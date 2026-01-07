@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Settings2, Calendar, Filter, MapPin, Plus, Loader2 } from 'lucide-react';
+import { Settings2, Calendar, Filter, MapPin, Compass } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EventCard } from '@/components/EventCard';
 import { GenreChip } from '@/components/GenreChip';
@@ -71,7 +71,7 @@ export default function Feed() {
   const { toast } = useToast();
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
-  const [addingDemoEvents, setAddingDemoEvents] = useState(false);
+  const [expandingSearch, setExpandingSearch] = useState(false);
   const [profile, setProfile] = useState<Profile>({ city: null, radius_km: 50, latitude: null, longitude: null });
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
@@ -170,144 +170,44 @@ export default function Feed() {
     }
   };
 
-  const addDemoEvents = async () => {
-    setAddingDemoEvents(true);
+  // Auto-expand search when no local events found
+  const expandSearch = useCallback(async () => {
+    if (expandingSearch || !profile.latitude || !profile.longitude) return;
     
-    const demoEvents = [
-      {
-        name: 'Berghain Anniversary',
-        description: 'The legendary club celebrates another year of pure techno.',
-        venue_name: 'Berghain',
-        city: 'Berlin',
-        latitude: 52.5112,
-        longitude: 13.4418,
-        start_datetime: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-        end_datetime: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString(),
-        min_price: 20,
-        event_type: 'club' as const,
-        genres: ['Techno', 'Industrial'],
-        image_url: 'https://images.unsplash.com/photo-1574391884720-bbc3740c59d1?w=800',
-      },
-      {
-        name: 'Awakenings Festival',
-        description: 'Europe\'s premier techno festival returns.',
-        venue_name: 'Spaarnwoude',
-        city: 'Amsterdam',
-        latitude: 52.4211,
-        longitude: 4.7022,
-        start_datetime: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-        end_datetime: new Date(Date.now() + 16 * 24 * 60 * 60 * 1000).toISOString(),
-        min_price: 85,
-        event_type: 'festival' as const,
-        genres: ['Techno', 'House'],
-        image_url: 'https://images.unsplash.com/photo-1470229722913-7c0e2dbbafd3?w=800',
-      },
-      {
-        name: 'Movement Detroit',
-        description: 'The birthplace of techno hosts its annual celebration.',
-        venue_name: 'Hart Plaza',
-        city: 'Detroit',
-        latitude: 42.3286,
-        longitude: -83.0450,
-        start_datetime: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-        end_datetime: new Date(Date.now() + 32 * 24 * 60 * 60 * 1000).toISOString(),
-        min_price: 150,
-        event_type: 'festival' as const,
-        genres: ['Techno', 'House', 'EDM'],
-        image_url: 'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?w=800',
-      },
-      {
-        name: 'Warehouse Rave',
-        description: 'Underground techno in a secret Stockholm location.',
-        venue_name: 'Secret Location',
-        city: 'Stockholm',
-        latitude: 59.3293,
-        longitude: 18.0686,
-        start_datetime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        min_price: 25,
-        event_type: 'rave' as const,
-        genres: ['Techno', 'Trance'],
-        image_url: 'https://images.unsplash.com/photo-1598387993441-a364f854c3e1?w=800',
-      },
-      {
-        name: 'Drum & Bass Arena',
-        description: 'The best DnB DJs under one roof.',
-        venue_name: 'Fabrik',
-        city: 'Madrid',
-        latitude: 40.4168,
-        longitude: -3.7038,
-        start_datetime: new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString(),
-        min_price: 30,
-        event_type: 'club' as const,
-        genres: ['Drum & Bass'],
-        image_url: 'https://images.unsplash.com/photo-1571266028243-e4733b0f0bb0?w=800',
-      },
-      {
-        name: 'Tomorrowland Winter',
-        description: 'EDM meets the French Alps.',
-        venue_name: 'Alpe d\'Huez',
-        city: 'Alpe d\'Huez',
-        latitude: 45.0911,
-        longitude: 6.0693,
-        start_datetime: new Date(Date.now() + 45 * 24 * 60 * 60 * 1000).toISOString(),
-        end_datetime: new Date(Date.now() + 52 * 24 * 60 * 60 * 1000).toISOString(),
-        min_price: 350,
-        event_type: 'festival' as const,
-        genres: ['EDM', 'House', 'Trance'],
-        image_url: 'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?w=800',
-      },
-      {
-        name: 'Defqon.1',
-        description: 'The world\'s largest hardstyle festival.',
-        venue_name: 'Evenemententerrein',
-        city: 'Biddinghuizen',
-        latitude: 52.4538,
-        longitude: 5.7050,
-        start_datetime: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(),
-        end_datetime: new Date(Date.now() + 63 * 24 * 60 * 60 * 1000).toISOString(),
-        min_price: 200,
-        event_type: 'festival' as const,
-        genres: ['Hardstyle'],
-        image_url: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?w=800',
-      },
-      {
-        name: 'Charlotte de Witte Live',
-        description: 'Belgian techno queen performs an extended set.',
-        venue_name: 'Printworks',
-        city: 'London',
-        latitude: 51.5074,
-        longitude: -0.1278,
-        start_datetime: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
-        min_price: 45,
-        event_type: 'concert' as const,
-        genres: ['Techno'],
-        image_url: 'https://images.unsplash.com/photo-1504680177321-2e6a879aac86?w=800',
-      },
-    ];
-
-    try {
-      const { error } = await supabase
-        .from('events')
-        .insert(demoEvents);
-      
-      if (error) throw error;
-      
-      toast({
-        title: 'Demo events added!',
-        description: `${demoEvents.length} events are now in your feed`,
+    setExpandingSearch(true);
+    
+    // Expand radius to 200km to include nearby cities
+    const expandedRadius = Math.max(profile.radius_km * 2, 200);
+    
+    const { data } = await supabase
+      .from('events')
+      .select('*')
+      .gte('start_datetime', new Date().toISOString())
+      .order('start_datetime', { ascending: true })
+      .limit(50);
+    
+    if (data && data.length > 0) {
+      // Filter by expanded radius
+      const nearbyEvents = data.filter(event => {
+        if (!event.latitude || !event.longitude) return true; // Include events without coords
+        const distance = calculateDistance(
+          profile.latitude!, profile.longitude!,
+          event.latitude, event.longitude
+        );
+        return distance <= expandedRadius;
       });
       
-      fetchEvents();
-    } catch (error: any) {
-      toast({
-        title: 'Failed to add events',
-        description: error.message,
-        variant: 'destructive',
-      });
-    } finally {
-      setAddingDemoEvents(false);
+      if (nearbyEvents.length > 0) {
+        setEvents(nearbyEvents);
+        toast({
+          title: 'Search expanded',
+          description: `Found ${nearbyEvents.length} events within ${expandedRadius}km`,
+        });
+      }
     }
-  };
+    
+    setExpandingSearch(false);
+  }, [profile, expandingSearch, toast]);
 
   const updateRadius = async (radius: number) => {
     if (!user) return;
@@ -510,31 +410,38 @@ export default function Feed() {
             animate={{ opacity: 1, y: 0 }}
             className="text-center py-12"
           >
-            <Calendar className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-            <h3 className="font-display font-semibold text-lg mb-2">No events found</h3>
-            <p className="text-muted-foreground text-sm mb-4">
+            <Compass className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
+            <h3 className="font-display font-semibold text-lg mb-2">
               {events.length === 0 
-                ? 'Add some demo events to get started' 
-                : 'Try widening your radius or adjusting filters'}
+                ? 'No events detected in your area yet' 
+                : 'No matching events'}
+            </h3>
+            <p className="text-muted-foreground text-sm mb-4 max-w-xs mx-auto">
+              {events.length === 0 
+                ? 'We\'re expanding our search to nearby cities to find events for you.' 
+                : 'Try widening your radius or adjusting your filters to discover more events.'}
             </p>
             <div className="flex flex-col gap-2 items-center">
-              {events.length === 0 && (
+              {events.length === 0 ? (
                 <Button 
-                  variant="neon" 
-                  onClick={addDemoEvents}
-                  disabled={addingDemoEvents}
+                  variant="neon-outline" 
+                  onClick={expandSearch}
+                  disabled={expandingSearch}
+                  className="gap-2"
                 >
-                  {addingDemoEvents ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                  {expandingSearch ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                      Expanding search...
+                    </>
                   ) : (
                     <>
-                      <Plus className="w-4 h-4" />
-                      Add Demo Events
+                      <Compass className="w-4 h-4" />
+                      Search nearby cities
                     </>
                   )}
                 </Button>
-              )}
-              {events.length > 0 && (
+              ) : (
                 <Button variant="neon-outline" onClick={() => {
                   setSelectedGenres([]);
                   setSelectedTypes([]);
