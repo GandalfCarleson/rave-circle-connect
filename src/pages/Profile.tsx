@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { LogOut, MapPin, User, Music, Settings, Loader2 } from 'lucide-react';
+import { LogOut, MapPin, Music, Settings, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { GenreChip } from '@/components/GenreChip';
 import { RadiusSlider } from '@/components/RadiusSlider';
 import { BottomNav } from '@/components/BottomNav';
+import { AnimatedBackground } from '@/components/AnimatedBackground';
+import { AvatarUpload } from '@/components/AvatarUpload';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -18,11 +21,14 @@ interface ProfileData {
   name: string | null;
   username: string | null;
   avatar_url: string | null;
+  bio: string | null;
   city: string | null;
   radius_km: number;
   is_discoverable: boolean;
   show_events_on_profile: boolean;
 }
+
+const BIO_MAX_LENGTH = 200;
 
 export default function Profile() {
   const { user, loading: authLoading, signOut } = useAuth();
@@ -32,6 +38,7 @@ export default function Profile() {
     name: '',
     username: '',
     avatar_url: null,
+    bio: '',
     city: '',
     radius_km: 50,
     is_discoverable: true,
@@ -67,6 +74,7 @@ export default function Profile() {
         name: data.name,
         username: data.username,
         avatar_url: data.avatar_url,
+        bio: data.bio || '',
         city: data.city,
         radius_km: data.radius_km || 50,
         is_discoverable: data.is_discoverable ?? true,
@@ -112,7 +120,7 @@ export default function Profile() {
       setSelectedGenres(prev => [...prev, genre]);
       await supabase
         .from('user_preferences')
-        .insert({ user_id: user.id, genre });
+        .insert({ user_id: user.id, genre, intensity: 3 });
     }
   };
 
@@ -125,6 +133,7 @@ export default function Profile() {
       .update({
         name: profile.name,
         username: profile.username,
+        bio: profile.bio,
         city: profile.city,
         radius_km: profile.radius_km,
         is_discoverable: profile.is_discoverable,
@@ -162,6 +171,8 @@ export default function Profile() {
 
   return (
     <div className="min-h-screen gradient-bg pb-24">
+      <AnimatedBackground />
+      
       {/* Header */}
       <div className="sticky top-0 z-40 glass border-b border-border/50">
         <div className="max-w-lg mx-auto px-4 py-4 flex items-center justify-between">
@@ -172,24 +183,25 @@ export default function Profile() {
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto px-4 py-6 space-y-8">
+      <div className="max-w-lg mx-auto px-4 py-6 space-y-6 relative z-10">
         {/* Avatar & Basic Info */}
         <motion.section
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="card-neon rounded-xl border border-border/50 p-6"
         >
-          <div className="flex items-center gap-4 mb-6">
-            <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-primary/30 to-accent/30 overflow-hidden flex items-center justify-center">
-              {profile.avatar_url ? (
-                <img src={profile.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
-              ) : (
-                <User className="w-8 h-8 text-primary" />
-              )}
-            </div>
-            <div>
-              <h2 className="font-display font-bold text-lg">{profile.name || 'Set your name'}</h2>
+          <div className="flex items-start gap-4 mb-6">
+            <AvatarUpload
+              userId={user!.id}
+              currentAvatarUrl={profile.avatar_url}
+              onUpload={(url) => setProfile(prev => ({ ...prev, avatar_url: url }))}
+            />
+            <div className="flex-1 min-w-0">
+              <h2 className="font-display font-bold text-lg truncate">{profile.name || 'Set your name'}</h2>
               <p className="text-muted-foreground text-sm">@{profile.username || 'username'}</p>
+              {profile.bio && (
+                <p className="text-sm text-foreground/80 mt-2 line-clamp-2">{profile.bio}</p>
+              )}
             </div>
           </div>
 
@@ -209,10 +221,24 @@ export default function Profile() {
               <Input
                 id="username"
                 value={profile.username || ''}
-                onChange={(e) => setProfile(prev => ({ ...prev, username: e.target.value }))}
+                onChange={(e) => setProfile(prev => ({ ...prev, username: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '') }))}
                 placeholder="username"
                 className="mt-1.5 bg-muted border-border/50"
               />
+            </div>
+            <div>
+              <Label htmlFor="bio">Bio</Label>
+              <Textarea
+                id="bio"
+                value={profile.bio || ''}
+                onChange={(e) => setProfile(prev => ({ ...prev, bio: e.target.value.slice(0, BIO_MAX_LENGTH) }))}
+                placeholder="Tell us about yourself..."
+                className="mt-1.5 bg-muted border-border/50 resize-none"
+                rows={3}
+              />
+              <p className="text-xs text-muted-foreground mt-1 text-right">
+                {(profile.bio?.length || 0)}/{BIO_MAX_LENGTH}
+              </p>
             </div>
             <div>
               <Label htmlFor="city">City</Label>
