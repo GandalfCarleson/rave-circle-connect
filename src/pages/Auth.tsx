@@ -93,10 +93,23 @@ export default function Auth() {
     }
   };
 
+  const MAX_GENRES = 3;
+
   const toggleGenre = (genre: string) => {
-    setSelectedGenres(prev =>
-      prev.includes(genre) ? prev.filter(g => g !== genre) : [...prev, genre]
-    );
+    setSelectedGenres(prev => {
+      if (prev.includes(genre)) {
+        return prev.filter(g => g !== genre);
+      }
+      if (prev.length >= MAX_GENRES) {
+        toast({
+          title: 'Maximum reached',
+          description: `You can select up to ${MAX_GENRES} genres`,
+          variant: 'destructive',
+        });
+        return prev;
+      }
+      return [...prev, genre];
+    });
     if (errors.genres) {
       setErrors(prev => ({ ...prev, genres: undefined }));
     }
@@ -386,7 +399,20 @@ export default function Auth() {
                       <Music className="w-6 h-6 text-secondary" />
                     </div>
                     <h3 className="font-display font-semibold text-lg">What's your vibe?</h3>
-                    <p className="text-muted-foreground text-sm">Select the genres you love</p>
+                    <p className="text-muted-foreground text-sm">Choose up to 3 genres that define your sound</p>
+                  </div>
+
+                  {/* Selection counter */}
+                  <div className="flex justify-center">
+                    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                      selectedGenres.length === 0 
+                        ? 'bg-muted text-muted-foreground' 
+                        : selectedGenres.length === MAX_GENRES 
+                          ? 'bg-primary/20 text-primary' 
+                          : 'bg-secondary/20 text-secondary'
+                    }`}>
+                      <span>{selectedGenres.length} / {MAX_GENRES} selected</span>
+                    </div>
                   </div>
 
                   <div className="flex flex-wrap gap-2 justify-center">
@@ -403,10 +429,6 @@ export default function Auth() {
                   {errors.genres && (
                     <p className="text-destructive text-xs text-center">{errors.genres}</p>
                   )}
-
-                  <p className="text-center text-xs text-muted-foreground">
-                    {selectedGenres.length} genre{selectedGenres.length !== 1 ? 's' : ''} selected
-                  </p>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -425,7 +447,7 @@ export default function Auth() {
               
               <Button
                 type="submit"
-                disabled={loading}
+                disabled={loading || (mode === 'signup' && signupStep === 2 && selectedGenres.length === 0)}
                 className="flex-1 h-12"
                 variant="neon"
               >
@@ -439,10 +461,19 @@ export default function Auth() {
                     <ChevronRight className="w-4 h-4 ml-1" />
                   </>
                 ) : (
-                  'Create Account'
+                  <>
+                    Create Account
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </>
                 )}
               </Button>
             </div>
+            
+            {mode === 'signup' && signupStep === 2 && selectedGenres.length === 0 && (
+              <p className="text-xs text-muted-foreground text-center mt-2">
+                Select at least 1 genre to continue
+              </p>
+            )}
           </form>
 
           {/* Meta OAuth Placeholder */}
