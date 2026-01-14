@@ -1,4 +1,5 @@
-import { Users, Lock, Globe, MapPin } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Lock, Globe, MapPin, Users } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
@@ -7,18 +8,22 @@ interface GroupCardProps {
   name: string;
   city?: string;
   isPrivate: boolean;
-  memberCount?: number;
+  activityText?: string;
+  activityTimestamp?: string;
   imageUrl?: string;
   onClick?: () => void;
+  action?: ReactNode;
 }
 
 export function GroupCard({
   name,
   city,
   isPrivate,
-  memberCount = 0,
+  activityText,
+  activityTimestamp,
   imageUrl,
   onClick,
+  action,
 }: GroupCardProps) {
   return (
     <motion.div
@@ -49,22 +54,22 @@ export function GroupCard({
               <Globe className="w-3.5 h-3.5 text-secondary flex-shrink-0" />
             )}
           </div>
-          <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
-            {city && (
-              <span className="flex items-center gap-1">
-                <MapPin className="w-3 h-3" />
-                {city}
-              </span>
+          <div className="mt-1 flex items-center justify-between gap-2 text-sm text-muted-foreground">
+            <p className="truncate">{activityText || 'No messages yet'}</p>
+            {activityTimestamp && (
+              <span className="text-xs text-muted-foreground/70 whitespace-nowrap">{activityTimestamp}</span>
             )}
-            <span className="flex items-center gap-1">
-              <Users className="w-3 h-3" />
-              {memberCount} {memberCount === 1 ? 'member' : 'members'}
-            </span>
           </div>
+          {city && (
+            <div className="flex items-center gap-1 mt-1 text-xs text-muted-foreground/80">
+              <MapPin className="w-3 h-3" />
+              <span className="truncate">{city}</span>
+            </div>
+          )}
         </div>
 
-        {/* Arrow indicator */}
-        <div className="text-muted-foreground">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          {action}
           <svg
             className="w-5 h-5"
             fill="none"

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { LogOut, MapPin, Music, Settings, Loader2 } from 'lucide-react';
+import { LogOut, MapPin, Music, Settings, Pin, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,7 +15,7 @@ import { AvatarUpload } from '@/components/AvatarUpload';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import { GENRES } from '@/lib/constants';
+import { GENRES, RADIUS_OPTIONS } from '@/lib/constants';
 
 interface ProfileData {
   name: string | null;
@@ -40,7 +40,7 @@ export default function Profile() {
     avatar_url: null,
     bio: '',
     city: '',
-    radius_km: 50,
+    radius_km: 100,
     is_discoverable: true,
     show_events_on_profile: true,
   });
@@ -76,7 +76,9 @@ export default function Profile() {
         avatar_url: data.avatar_url,
         bio: data.bio || '',
         city: data.city,
-        radius_km: data.radius_km || 50,
+        radius_km: data.radius_km && RADIUS_OPTIONS.some(option => option.value === data.radius_km)
+          ? data.radius_km
+          : RADIUS_OPTIONS[0].value,
         is_discoverable: data.is_discoverable ?? true,
         show_events_on_profile: data.show_events_on_profile ?? true,
       });
@@ -177,9 +179,14 @@ export default function Profile() {
       <div className="sticky top-0 z-40 glass border-b border-border/50">
         <div className="max-w-lg mx-auto px-4 py-4 flex items-center justify-between">
           <h1 className="text-xl font-display font-bold">Profile</h1>
-          <Button variant="ghost" size="icon" onClick={handleSignOut}>
-            <LogOut className="w-5 h-5" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="icon" onClick={() => navigate('/settings')}>
+              <Settings className="w-5 h-5" />
+            </Button>
+            <Button variant="ghost" size="icon" onClick={handleSignOut}>
+              <LogOut className="w-5 h-5" />
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -295,6 +302,29 @@ export default function Profile() {
               />
             ))}
           </div>
+        </motion.section>
+
+        {/* Saved Events */}
+        <motion.section
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="card-neon rounded-xl border border-border/50 p-6"
+        >
+          <div className="flex items-center gap-2 mb-4">
+            <Pin className="w-5 h-5 text-primary" />
+            <h3 className="font-display font-semibold">Saved events</h3>
+          </div>
+          <p className="text-sm text-muted-foreground mb-4">
+            Your pinned events from the feed
+          </p>
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => navigate('/profile/saved')}
+          >
+            View saved events
+          </Button>
         </motion.section>
 
         {/* Settings */}

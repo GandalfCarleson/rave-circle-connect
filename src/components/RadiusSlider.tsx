@@ -9,8 +9,8 @@ interface RadiusSliderProps {
 }
 
 export function RadiusSlider({ value, onChange, city }: RadiusSliderProps) {
-  const currentOption = RADIUS_OPTIONS.find(o => o.value === value) || RADIUS_OPTIONS[3];
-  const sliderIndex = RADIUS_OPTIONS.findIndex(o => o.value === value);
+  const currentOption = RADIUS_OPTIONS.find(o => o.value === value) || RADIUS_OPTIONS[0];
+  const sliderIndex = Math.max(0, RADIUS_OPTIONS.findIndex(o => o.value === value));
 
   return (
     <div className="space-y-4">
@@ -20,7 +20,7 @@ export function RadiusSlider({ value, onChange, city }: RadiusSliderProps) {
           <span className="font-display font-semibold">{city || 'Set Location'}</span>
         </div>
         <span className="text-sm text-primary font-medium bg-primary/10 px-3 py-1 rounded-full">
-          {currentOption.label === 'No limit' ? 'Anywhere' : `within ${currentOption.label}`}
+          {currentOption.display}
         </span>
       </div>
       
@@ -40,7 +40,7 @@ export function RadiusSlider({ value, onChange, city }: RadiusSliderProps) {
             key={option.value}
             className={value === option.value ? 'text-primary font-medium' : ''}
           >
-            {option.value === 0 ? '∞' : option.value}
+            {option.label}
           </span>
         ))}
       </div>

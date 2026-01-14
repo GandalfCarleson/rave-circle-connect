@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Plus, Users, Loader2 } from 'lucide-react';
+import { format, isToday } from 'date-fns';
+import { Plus, Users, Loader2, MoreVertical, LogOut, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -20,6 +21,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { leaveCrew, deleteCrew } from '@/services/crewMembershipService';
 
 interface Group {
   id: string;
@@ -28,6 +30,16 @@ interface Group {
   is_private: boolean;
   image_url: string | null;
   member_count: number;
+  owner_id?: string;
+  role?: string | null;
+  last_activity_at?: string | null;
+  last_activity_preview?: string | null;
+}
+
+interface GroupActivityRow {
+  group_id: string;
+  last_activity_at: string | null;
+  last_activity_preview: string | null;
 }
 
 export default function Groups() {
@@ -38,12 +50,19 @@ export default function Groups() {
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [actionGroup, setActionGroup] = useState<Group | null>(null);
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [actionSheetOpen, setActionSheetOpen] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [newGroup, setNewGroup] = useState({
     name: '',
     description: '',
     city: '',
     isPrivate: true,
   });
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressTriggeredRef = useRef(false);
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -62,37 +81,80 @@ export default function Groups() {
     setLoading(true);
     
     try {
-      // Get groups where user is a member
-      const { data: memberGroups, error: memberError } = await supabase
+      const { data: memberships, error: memberError } = await supabase
         .from('group_members')
-        .select('group_id')
+        .select('group_id, role, groups:group_id (id, name, city, is_private, image_url, owner_id, created_at)')
         .eq('user_id', user.id);
-      
+
       if (memberError) throw memberError;
-      
-      if (memberGroups && memberGroups.length > 0) {
-        const groupIds = memberGroups.map(m => m.group_id);
-        
-        const { data: groupsData, error: groupsError } = await supabase
-          .from('groups')
-          .select('*')
-          .in('id', groupIds);
-        
-        if (groupsError) throw groupsError;
-        
-        if (groupsData) {
-          // Get member counts
-          const groupsWithCounts = await Promise.all(
-            groupsData.map(async (group) => {
-              const { count } = await supabase
-                .from('group_members')
-                .select('*', { count: 'exact', head: true })
-                .eq('group_id', group.id);
-              return { ...group, member_count: count || 0 };
-            })
-          );
-          setGroups(groupsWithCounts);
+
+      if (memberships && memberships.length > 0) {
+        console.log('Crew memberships', memberships);
+        const groupIds = memberships
+          .map((membership) => membership.group_id)
+          .filter(Boolean);
+
+        let groupsData = memberships
+          .map((membership) => {
+            if (!membership.groups) return null;
+            return {
+              ...membership.groups,
+              role: membership.role ?? null,
+            } as Group;
+          })
+          .filter((group): group is Group => Boolean(group && group.id));
+
+        if (groupsData.length === 0 && groupIds.length > 0) {
+          const { data: fallbackGroups } = await supabase
+            .from('groups')
+            .select('*')
+            .in('id', groupIds);
+          groupsData = (fallbackGroups || []).map((group) => ({
+            ...group,
+            role: memberships.find((membership) => membership.group_id === group.id)?.role ?? null,
+          }));
         }
+
+        const groupsWithCounts = await Promise.all(
+          groupsData.map(async (group) => {
+            const { count } = await supabase
+              .from('group_members')
+              .select('*', { count: 'exact', head: true })
+              .eq('group_id', group.id);
+            return {
+              ...group,
+              member_count: count || 0,
+            };
+          })
+        );
+
+        const { data: activities } = groupIds.length > 0
+          ? await supabase
+              .from('group_last_activity')
+              .select('group_id, last_activity_at, last_activity_preview')
+              .in('group_id', groupIds)
+          : { data: [] as GroupActivityRow[] };
+
+        const activityByGroup = new Map(
+          (activities as GroupActivityRow[] || []).map(activity => [activity.group_id, activity])
+        );
+
+        const merged = groupsWithCounts.map(group => {
+          const activity = activityByGroup.get(group.id);
+          return {
+            ...group,
+            last_activity_at: activity?.last_activity_at ?? null,
+            last_activity_preview: activity?.last_activity_preview ?? null,
+          };
+        });
+
+        merged.sort((a, b) => {
+          const aTime = a.last_activity_at ? new Date(a.last_activity_at).getTime() : 0;
+          const bTime = b.last_activity_at ? new Date(b.last_activity_at).getTime() : 0;
+          return bTime - aTime;
+        });
+
+        setGroups(merged);
       } else {
         setGroups([]);
       }
@@ -106,6 +168,147 @@ export default function Groups() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const formatActivityTime = (timestamp?: string | null) => {
+    if (!timestamp) return undefined;
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return undefined;
+    return isToday(date) ? format(date, 'HH:mm') : format(date, 'MMM d');
+  };
+
+  const closeMenus = () => {
+    setContextMenuPos(null);
+    setActionSheetOpen(false);
+    setActionGroup(null);
+  };
+
+  const isOwner = (group: Group) => {
+    if (!user) return false;
+    return group.role === 'owner' || group.owner_id === user.id;
+  };
+
+  const openActionMenu = (group: Group, mode: 'sheet' | 'context', position?: { x: number; y: number }) => {
+    setActionGroup(group);
+    if (mode === 'context') {
+      setContextMenuPos(position || { x: 0, y: 0 });
+      setActionSheetOpen(false);
+    } else {
+      setActionSheetOpen(true);
+      setContextMenuPos(null);
+    }
+  };
+
+  const handlePointerDown = (group: Group, event: React.PointerEvent) => {
+    if (event.pointerType !== 'touch') return;
+    pointerStartRef.current = { x: event.clientX, y: event.clientY };
+    longPressTriggeredRef.current = false;
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+    }
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTriggeredRef.current = true;
+      openActionMenu(group, 'sheet');
+      if (navigator.vibrate) {
+        navigator.vibrate(10);
+      }
+    }, 450);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent) => {
+    if (!pointerStartRef.current || !longPressTimerRef.current) return;
+    const dx = event.clientX - pointerStartRef.current.x;
+    const dy = event.clientY - pointerStartRef.current.y;
+    if (Math.hypot(dx, dy) > 12) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handlePointerEnd = () => {
+    if (longPressTimerRef.current) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    pointerStartRef.current = null;
+  };
+
+  const handleContextMenu = (group: Group, event: React.MouseEvent) => {
+    event.preventDefault();
+    const menuWidth = 200;
+    const menuHeight = 120;
+    const x = Math.min(event.clientX, window.innerWidth - menuWidth - 12);
+    const y = Math.min(event.clientY, window.innerHeight - menuHeight - 12);
+    openActionMenu(group, 'context', { x, y });
+  };
+
+  const handleThreeDots = (group: Group, event: React.MouseEvent) => {
+    event.stopPropagation();
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    const menuWidth = 200;
+    const menuHeight = 120;
+    const x = Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - 12);
+    const y = Math.min(rect.bottom + 6, window.innerHeight - menuHeight - 12);
+    openActionMenu(group, 'context', { x, y });
+  };
+
+  const handleLeaveCrew = async (group: Group) => {
+    if (!user) return;
+    if (isOwner(group) && group.member_count > 1) {
+      toast({
+        title: 'Transfer ownership before leaving',
+        description: 'You have other members in this crew.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (isOwner(group) && group.member_count <= 1) {
+      setActionGroup(group);
+      setConfirmDeleteOpen(true);
+      return;
+    }
+    const { error } = await leaveCrew(group.id, user.id);
+    if (error) {
+      toast({
+        title: 'Unable to leave crew',
+        description: error.message,
+        variant: 'destructive',
+      });
+      return;
+    }
+    setGroups(prev => prev.filter(item => item.id !== group.id));
+    toast({
+      title: 'Left crew',
+      description: 'You have left this crew.',
+    });
+    closeMenus();
+  };
+
+  const handleDeleteCrew = async (group: Group) => {
+    if (!user) return;
+    if (!isOwner(group)) {
+      toast({
+        title: 'Not allowed',
+        description: 'Only owners can delete crews.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    const { error } = await deleteCrew(group.id);
+    if (error) {
+      toast({
+        title: 'Unable to delete crew',
+        description: error.message,
+        variant: 'destructive',
+      });
+      return;
+    }
+    setGroups(prev => prev.filter(item => item.id !== group.id));
+    toast({
+      title: 'Crew deleted',
+      description: 'This crew has been removed.',
+    });
+    closeMenus();
   };
 
   const createGroup = async () => {
@@ -373,27 +576,163 @@ export default function Groups() {
           </motion.div>
         ) : (
           <div className="space-y-3">
-            {groups.map((group, index) => (
+            {groups.filter(group => group.id).map((group, index) => (
               <motion.div
                 key={group.id}
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.1 }}
+                onContextMenu={(event) => handleContextMenu(group, event)}
+                onPointerDown={(event) => handlePointerDown(group, event)}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerEnd}
+                onPointerCancel={handlePointerEnd}
               >
                 <GroupCard
                   id={group.id}
                   name={group.name}
                   city={group.city || undefined}
                   isPrivate={group.is_private}
-                  memberCount={group.member_count}
+                  activityText={group.last_activity_preview || undefined}
+                  activityTimestamp={formatActivityTime(group.last_activity_at)}
                   imageUrl={group.image_url || undefined}
-                  onClick={() => navigate(`/groups/${group.id}`)}
+                  onClick={() => {
+                    if (longPressTriggeredRef.current) {
+                      longPressTriggeredRef.current = false;
+                      return;
+                    }
+                    if (group.id) {
+                      navigate(`/groups/${group.id}`);
+                    }
+                  }}
+                  action={(
+                    <button
+                      type="button"
+                      onClick={(event) => handleThreeDots(group, event)}
+                      className="p-1 rounded-md hover:bg-muted/60"
+                      aria-label="Crew actions"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+                  )}
                 />
               </motion.div>
             ))}
           </div>
         )}
       </div>
+
+      {contextMenuPos && actionGroup && (
+        <div
+          className="fixed inset-0 z-50"
+          onClick={closeMenus}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            closeMenus();
+          }}
+        >
+          <div
+            className="fixed card-neon border border-border/60 rounded-lg bg-card/95 backdrop-blur-sm shadow-lg p-2 w-[200px]"
+            style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={() => handleLeaveCrew(actionGroup)}
+              className="w-full text-left px-3 py-2 rounded-md text-sm text-destructive hover:bg-destructive/10 flex items-center gap-2"
+            >
+              <LogOut className="w-4 h-4" />
+              Leave crew
+            </button>
+            {isOwner(actionGroup) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setContextMenuPos(null);
+                  setActionSheetOpen(false);
+                  setConfirmDeleteOpen(true);
+                }}
+                className="w-full text-left px-3 py-2 rounded-md text-sm text-destructive hover:bg-destructive/10 flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete crew
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {actionSheetOpen && actionGroup && (
+        <div className="fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/60" onClick={closeMenus} />
+          <div className="absolute bottom-0 left-0 right-0 card-neon border border-border/60 rounded-t-2xl bg-card/95 backdrop-blur-sm p-4 space-y-3">
+            <button
+              type="button"
+              onClick={() => handleLeaveCrew(actionGroup)}
+              className="w-full text-left px-4 py-3 rounded-lg text-sm text-destructive hover:bg-destructive/10 flex items-center gap-2"
+            >
+              <LogOut className="w-4 h-4" />
+              Leave crew
+            </button>
+            {isOwner(actionGroup) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setContextMenuPos(null);
+                  setActionSheetOpen(false);
+                  setConfirmDeleteOpen(true);
+                }}
+                className="w-full text-left px-4 py-3 rounded-lg text-sm text-destructive hover:bg-destructive/10 flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                Delete crew
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={closeMenus}
+              className="w-full text-left px-4 py-3 rounded-lg text-sm text-muted-foreground hover:bg-muted/30"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <Dialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+        <DialogContent className="bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="font-display">Delete crew?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              This removes the crew for everyone. This can’t be undone.
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => setConfirmDeleteOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                className="flex-1"
+                onClick={() => {
+                  if (actionGroup) {
+                    handleDeleteCrew(actionGroup);
+                  }
+                  setConfirmDeleteOpen(false);
+                  setPendingAction(null);
+                }}
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <BottomNav />
     </div>

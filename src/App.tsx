@@ -11,7 +11,10 @@ import Groups from "./pages/Groups";
 import GroupDetail from "./pages/GroupDetail";
 import Discover from "./pages/Discover";
 import Profile from "./pages/Profile";
+import SavedEvents from "./pages/SavedEvents";
 import EventDetail from "./pages/EventDetail";
+import ResetPassword from "./pages/ResetPassword";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -31,6 +34,9 @@ const App = () => (
             <Route path="/groups/:id" element={<GroupDetail />} />
             <Route path="/discover" element={<Discover />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/profile/saved" element={<SavedEvents />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/auth/reset-password" element={<ResetPassword />} />
             <Route path="/events/:id" element={<EventDetail />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

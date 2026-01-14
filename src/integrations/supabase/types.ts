@@ -21,6 +21,7 @@ export type Database = {
           description: string | null
           end_datetime: string | null
           event_type: Database["public"]["Enums"]["event_type"] | null
+          external_id: string | null
           genres: string[] | null
           id: string
           image_url: string | null
@@ -28,6 +29,7 @@ export type Database = {
           longitude: number | null
           min_price: number | null
           name: string
+          source: string | null
           start_datetime: string
           ticket_url: string | null
           venue_name: string | null
@@ -38,6 +40,7 @@ export type Database = {
           description?: string | null
           end_datetime?: string | null
           event_type?: Database["public"]["Enums"]["event_type"] | null
+          external_id?: string | null
           genres?: string[] | null
           id?: string
           image_url?: string | null
@@ -45,6 +48,7 @@ export type Database = {
           longitude?: number | null
           min_price?: number | null
           name: string
+          source?: string | null
           start_datetime: string
           ticket_url?: string | null
           venue_name?: string | null
@@ -55,6 +59,7 @@ export type Database = {
           description?: string | null
           end_datetime?: string | null
           event_type?: Database["public"]["Enums"]["event_type"] | null
+          external_id?: string | null
           genres?: string[] | null
           id?: string
           image_url?: string | null
@@ -62,11 +67,90 @@ export type Database = {
           longitude?: number | null
           min_price?: number | null
           name?: string
+          source?: string | null
           start_datetime?: string
           ticket_url?: string | null
           venue_name?: string | null
         }
         Relationships: []
+      }
+      crew_event_pins: {
+        Row: {
+          crew_id: string
+          created_at: string | null
+          event_id: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          crew_id: string
+          created_at?: string | null
+          event_id: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          crew_id?: string
+          created_at?: string | null
+          event_id?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crew_event_pins_crew_id_fkey"
+            columns: ["crew_id"]
+            isOneToOne: false
+            referencedRelation: "groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crew_event_pins_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crew_events: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          crew_id: string
+          event_id: string
+          id: string
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          crew_id: string
+          event_id: string
+          id?: string
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          crew_id?: string
+          event_id?: string
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crew_events_crew_id_fkey"
+            columns: ["crew_id"]
+            isOneToOne: false
+            referencedRelation: "groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "crew_events_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       group_members: {
         Row: {
@@ -102,31 +186,27 @@ export type Database = {
       }
       group_pinned_events: {
         Row: {
+          created_at: string | null
           event_id: string
           group_id: string
           id: string
-          pinned_at: string | null
+          pinned_by: string | null
         }
         Insert: {
+          created_at?: string | null
           event_id: string
           group_id: string
           id?: string
-          pinned_at?: string | null
+          pinned_by?: string | null
         }
         Update: {
+          created_at?: string | null
           event_id?: string
           group_id?: string
           id?: string
-          pinned_at?: string | null
+          pinned_by?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "group_pinned_events_event_id_fkey"
-            columns: ["event_id"]
-            isOneToOne: false
-            referencedRelation: "events"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "group_pinned_events_group_id_fkey"
             columns: ["group_id"]
@@ -176,24 +256,39 @@ export type Database = {
         Row: {
           attached_event_id: string | null
           created_at: string | null
+          edited_at: string | null
           group_id: string
           id: string
+          message_type: Database["public"]["Enums"]["message_type"] | null
+          retracted_at: string | null
+          retracted_by: string | null
+          reply_to_message_id: string | null
           text: string | null
           user_id: string
         }
         Insert: {
           attached_event_id?: string | null
           created_at?: string | null
+          edited_at?: string | null
           group_id: string
           id?: string
+          message_type?: Database["public"]["Enums"]["message_type"] | null
+          retracted_at?: string | null
+          retracted_by?: string | null
+          reply_to_message_id?: string | null
           text?: string | null
           user_id: string
         }
         Update: {
           attached_event_id?: string | null
           created_at?: string | null
+          edited_at?: string | null
           group_id?: string
           id?: string
+          message_type?: Database["public"]["Enums"]["message_type"] | null
+          retracted_at?: string | null
+          retracted_by?: string | null
+          reply_to_message_id?: string | null
           text?: string | null
           user_id?: string
         }
@@ -206,10 +301,88 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "messages_reply_to_message_id_fkey"
+            columns: ["reply_to_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "messages_group_id_fkey"
             columns: ["group_id"]
             isOneToOne: false
             referencedRelation: "groups"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      message_reactions: {
+        Row: {
+          created_at: string | null
+          emoji: string
+          id: string
+          message_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          emoji: string
+          id?: string
+          message_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          emoji?: string
+          id?: string
+          message_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_reactions_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      group_reads: {
+        Row: {
+          group_id: string
+          id: string
+          last_read_at: string | null
+          last_read_message_id: string | null
+          user_id: string
+        }
+        Insert: {
+          group_id: string
+          id?: string
+          last_read_at?: string | null
+          last_read_message_id?: string | null
+          user_id: string
+        }
+        Update: {
+          group_id?: string
+          id?: string
+          last_read_at?: string | null
+          last_read_message_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_reads_group_id_fkey"
+            columns: ["group_id"]
+            isOneToOne: false
+            referencedRelation: "groups"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_reads_last_read_message_id_fkey"
+            columns: ["last_read_message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
             referencedColumns: ["id"]
           },
         ]
@@ -306,6 +479,35 @@ export type Database = {
           },
         ]
       }
+      user_pinned_events: {
+        Row: {
+          created_at: string | null
+          event_id: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          event_id: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          event_id?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_pinned_events_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_preferences: {
         Row: {
           created_at: string | null
@@ -341,6 +543,7 @@ export type Database = {
       app_role: "owner" | "admin" | "member"
       event_status: "going" | "interested" | "ignored"
       event_type: "festival" | "club" | "rave" | "concert"
+      message_type: "text" | "event" | "system"
     }
     CompositeTypes: {
       [_ in never]: never

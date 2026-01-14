@@ -1,8 +1,8 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
 
 /* RaveCircle Design System - Refined Dark Neon Aesthetic */
 
@@ -167,6 +167,9 @@
   /* Message bubble */
   .message-bubble {
     @apply rounded-2xl px-4 py-2.5 max-w-[80%];
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: pre-wrap;
   }
 
   .message-bubble.sent {

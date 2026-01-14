@@ -16,17 +16,16 @@ export const GENRES = [
 export const EVENT_TYPES = ['festival', 'club', 'rave', 'concert'] as const;
 
 export const RADIUS_OPTIONS = [
-  { value: 5, label: '5 km' },
-  { value: 10, label: '10 km' },
-  { value: 25, label: '25 km' },
-  { value: 50, label: '50 km' },
-  { value: 100, label: '100 km' },
-  { value: 0, label: 'No limit' },
+  { value: 100, label: 'Local', display: 'Local · 100 km' },
+  { value: 300, label: 'Weekend', display: 'Weekend · 300 km' },
+  { value: 600, label: 'Weekend+', display: 'Weekend+ · 600 km' },
+  { value: 1000, label: 'Mission', display: 'Mission · 1000 km' },
+  { value: 1500, label: 'Full Send', display: 'Full Send · 1500+ km' },
 ] as const;
 
 export const DATE_FILTERS = [
-  { value: 'today', label: 'Today' },
-  { value: 'weekend', label: 'This Weekend' },
-  { value: 'next-weekend', label: 'Next Weekend' },
+  { value: 'this-week', label: 'This Week' },
+  { value: 'next-week', label: 'Next Week' },
   { value: 'month', label: 'This Month' },
+  { value: 'year', label: 'This Year' },
 ] as const;

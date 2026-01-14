@@ -10,6 +10,7 @@ interface GenreChipProps {
 export function GenreChip({ genre, isActive, onClick, size = 'md' }: GenreChipProps) {
   return (
     <button
+      type="button"
       onClick={onClick}
       className={cn(
         'genre-chip cursor-pointer border border-border/50',

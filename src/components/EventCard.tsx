@@ -1,5 +1,5 @@
-import { Calendar, MapPin, Ticket, Share2 } from 'lucide-react';
-import { format } from 'date-fns';
+import { Calendar, MapPin, Send, Heart, Pin } from 'lucide-react';
+import { format, differenceInCalendarDays } from 'date-fns';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { GenreChip } from './GenreChip';
@@ -11,6 +11,7 @@ interface EventCardProps {
   venueName?: string;
   city?: string;
   startDatetime: string;
+  endDatetime?: string;
   minPrice?: number;
   imageUrl?: string;
   eventType?: string;
@@ -18,6 +19,10 @@ interface EventCardProps {
   distance?: number;
   onView?: () => void;
   onShare?: () => void;
+  onToggleInterested?: () => void;
+  onTogglePinned?: () => void;
+  isInterested?: boolean;
+  isPinned?: boolean;
   compact?: boolean;
 }
 
@@ -26,6 +31,7 @@ export function EventCard({
   venueName,
   city,
   startDatetime,
+  endDatetime,
   minPrice,
   imageUrl,
   eventType,
@@ -33,11 +39,41 @@ export function EventCard({
   distance,
   onView,
   onShare,
+  onToggleInterested,
+  onTogglePinned,
+  isInterested,
+  isPinned,
   compact = false,
 }: EventCardProps) {
   const eventDate = new Date(startDatetime);
+  const eventEnd = endDatetime ? new Date(endDatetime) : null;
   const formattedDate = format(eventDate, 'EEE, MMM d');
   const formattedTime = format(eventDate, 'HH:mm');
+  const formattedEndTime = eventEnd ? format(eventEnd, 'HH:mm') : null;
+  const daySpan = eventEnd ? differenceInCalendarDays(eventEnd, eventDate) : 0;
+  const isMultiDay = daySpan > 0;
+  const dateRangeLabel = eventEnd
+    ? `${format(eventDate, 'MMM d')}–${format(eventEnd, 'MMM d')}`
+    : format(eventDate, 'MMM d');
+  const timeLabel = formattedEndTime ? `${formattedTime} – ${formattedEndTime}` : formattedTime;
+  const eventTypeLabel = eventType
+    ? eventType === 'club'
+      ? 'Club'
+      : eventType === 'festival'
+        ? 'Festival'
+        : eventType === 'concert'
+          ? 'Concert'
+          : 'Rave'
+    : undefined;
+  const eventTypeClass = eventType
+    ? eventType === 'club'
+      ? 'bg-secondary/90 text-secondary-foreground'
+      : eventType === 'festival'
+        ? 'bg-primary/90 text-primary-foreground'
+        : eventType === 'concert'
+          ? 'bg-accent/90 text-accent-foreground'
+          : 'bg-muted text-foreground'
+    : '';
 
   if (compact) {
     return (
@@ -86,12 +122,12 @@ export function EventCard({
             <Calendar className="w-12 h-12 text-primary/50" />
           </div>
         )}
-        <div className="event-image-overlay absolute inset-0" />
+        <div className="event-image-overlay absolute inset-0 pointer-events-none" />
         
         {/* Event type badge */}
-        {eventType && (
-          <span className="absolute top-3 left-3 px-2.5 py-1 rounded-full bg-primary/90 text-primary-foreground text-xs font-medium capitalize">
-            {eventType}
+        {eventTypeLabel && (
+          <span className={cn('absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-medium', eventTypeClass)}>
+            {eventTypeLabel}
           </span>
         )}
 
@@ -119,7 +155,11 @@ export function EventCard({
         {/* Date & Time */}
         <div className="flex items-center gap-2 text-primary text-sm font-medium">
           <Calendar className="w-4 h-4" />
-          <span>{formattedDate} • {formattedTime}</span>
+          {isMultiDay ? (
+            <span>{dateRangeLabel} • {daySpan + 1}-day</span>
+          ) : (
+            <span>{formattedDate} • {timeLabel}</span>
+          )}
         </div>
 
         {/* Genres */}
@@ -137,7 +177,7 @@ export function EventCard({
         )}
 
         {/* Actions */}
-        <div className="flex gap-2 pt-2">
+        <div className="flex items-center gap-2 pt-2 relative z-10">
           <Button
             onClick={onView}
             className="flex-1 btn-glow bg-primary hover:bg-primary/90"
@@ -145,12 +185,37 @@ export function EventCard({
             View Details
           </Button>
           <Button
+            onClick={onToggleInterested}
+            variant="outline"
+            size="icon"
+            disabled={!onToggleInterested}
+            className={cn(
+              'border-primary/50 hover:bg-primary/10',
+              isInterested && 'bg-primary/15 text-primary border-primary/70'
+            )}
+          >
+            <Heart className={cn('w-4 h-4', isInterested && 'fill-current')} />
+          </Button>
+          <Button
+            onClick={onTogglePinned}
+            variant="outline"
+            size="icon"
+            disabled={!onTogglePinned}
+            className={cn(
+              'border-primary/50 hover:bg-primary/10',
+              isPinned && 'bg-secondary/15 text-secondary border-secondary/70'
+            )}
+          >
+            <Pin className={cn('w-4 h-4', isPinned && 'fill-current')} />
+          </Button>
+          <Button
             onClick={onShare}
             variant="outline"
             size="icon"
+            disabled={!onShare}
             className="border-primary/50 hover:bg-primary/10"
           >
-            <Share2 className="w-4 h-4" />
+            <Send className="w-4 h-4" />
           </Button>
         </div>
       </div>

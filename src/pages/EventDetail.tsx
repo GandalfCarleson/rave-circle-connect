@@ -1,13 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, MapPin, Calendar, Ticket, Share2, Users, Check, Heart, CalendarPlus } from 'lucide-react';
+import { ArrowLeft, MapPin, Calendar, Ticket, Users, Check, Heart, CalendarPlus, Send } from 'lucide-react';
 import { format } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { GenreChip } from '@/components/GenreChip';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface Event {
   id: string;
@@ -35,6 +41,9 @@ export default function EventDetail() {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<EventStatus>(null);
   const [goingCount, setGoingCount] = useState(0);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [userGroups, setUserGroups] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -47,6 +56,7 @@ export default function EventDetail() {
       fetchEvent();
       fetchStatus();
       fetchGoingCount();
+      fetchUserGroups();
     }
   }, [user, id]);
 
@@ -83,6 +93,52 @@ export default function EventDetail() {
       .eq('status', 'going');
     
     setGoingCount(count || 0);
+  };
+
+  const fetchUserGroups = async () => {
+    if (!user) return;
+    const { data: memberGroups } = await supabase
+      .from('group_members')
+      .select('group_id')
+      .eq('user_id', user.id);
+
+    if (memberGroups && memberGroups.length > 0) {
+      const groupIds = memberGroups.map((member) => member.group_id);
+      const { data: groups } = await supabase
+        .from('groups')
+        .select('id, name')
+        .in('id', groupIds);
+      if (groups) setUserGroups(groups);
+    }
+  };
+
+  const shareToGroup = async () => {
+    if (!user || !event || !selectedGroupId) return;
+    const { error } = await supabase
+      .from('messages')
+      .insert({
+        group_id: selectedGroupId,
+        user_id: user.id,
+        text: null,
+        attached_event_id: event.id,
+        message_type: 'event',
+      });
+
+    if (!error) {
+      const groupName = userGroups.find(group => group.id === selectedGroupId)?.name;
+      toast({
+        title: 'Sent',
+        description: groupName ? `Sent to ${groupName}` : 'Event sent to your crew.',
+      });
+      setSelectedGroupId(null);
+      setShareModalOpen(false);
+    } else {
+      toast({
+        title: 'Failed to share',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
   };
 
   const updateStatus = async (newStatus: 'going' | 'interested') => {
@@ -304,11 +360,14 @@ END:VCALENDAR`;
                 Add to Calendar
               </Button>
               <Button
-                onClick={() => navigate('/groups')}
+                onClick={() => {
+                  setSelectedGroupId(null);
+                  setShareModalOpen(true);
+                }}
                 variant="outline"
                 className="flex-1"
               >
-                <Share2 className="w-4 h-4" />
+                <Send className="w-4 h-4" />
                 Share to Group
               </Button>
             </div>
@@ -327,6 +386,60 @@ END:VCALENDAR`;
           </div>
         </motion.div>
       </div>
+
+      <Dialog open={shareModalOpen} onOpenChange={setShareModalOpen}>
+        <DialogContent className="bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="font-display">Send to crew</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            {userGroups.length === 0 ? (
+              <>
+                <p className="text-muted-foreground text-sm text-center">
+                  You haven't joined any crews yet
+                </p>
+                <Button
+                  className="w-full mt-4"
+                  variant="neon"
+                  onClick={() => {
+                    setShareModalOpen(false);
+                    navigate('/groups');
+                  }}
+                >
+                  Create a Crew
+                </Button>
+              </>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  {userGroups.map(group => (
+                    <button
+                      key={group.id}
+                      type="button"
+                      onClick={() => setSelectedGroupId(group.id)}
+                      className={`w-full p-3 rounded-lg border text-left transition-colors ${
+                        selectedGroupId === group.id
+                          ? 'border-primary bg-primary/10'
+                          : 'border-border hover:border-primary/50'
+                      }`}
+                    >
+                      <p className="font-medium">{group.name}</p>
+                    </button>
+                  ))}
+                </div>
+                <Button
+                  onClick={shareToGroup}
+                  disabled={!selectedGroupId}
+                  className="w-full mt-4"
+                  variant="neon"
+                >
+                  Send
+                </Button>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

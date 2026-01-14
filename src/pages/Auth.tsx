@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, Lock, User, Loader2, Zap, Music, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Mail, Lock, User, Loader2, Zap, Music, MapPin, ChevronRight, ChevronLeft } from 'lucide-react';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,16 +15,25 @@ const emailSchema = z.string().email('Please enter a valid email');
 const passwordSchema = z.string().min(6, 'Password must be at least 6 characters');
 const nameSchema = z.string().min(2, 'Name must be at least 2 characters');
 
+type SignupStep = 'account' | 'genres' | 'location';
+
 export default function Auth() {
   const [mode, setMode] = useState<'login' | 'signup'>('login');
-  const [signupStep, setSignupStep] = useState(1);
+  const [signupStep, setSignupStep] = useState<SignupStep>('account');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
+  const [city, setCity] = useState('');
+  const [latitude, setLatitude] = useState<number | null>(null);
+  const [longitude, setLongitude] = useState<number | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [showReset, setShowReset] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState<{ email?: string; password?: string; name?: string; genres?: string }>({});
+  const [errors, setErrors] = useState<{ email?: string; password?: string; name?: string; genres?: string; location?: string }>({});
 
   const { signIn, signUp, user } = useAuth();
   const navigate = useNavigate();
@@ -69,6 +78,17 @@ export default function Auth() {
     return Object.keys(newErrors).length === 0;
   };
 
+  const validateStep3 = () => {
+    const newErrors: typeof errors = {};
+
+    if (!city.trim() && (latitude === null || longitude === null)) {
+      newErrors.location = 'Please enter a city or use your current location';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const validateLogin = () => {
     const newErrors: typeof errors = {};
 
@@ -87,9 +107,18 @@ export default function Auth() {
   };
 
   const handleNextStep = () => {
-    if (validateStep1()) {
-      setSignupStep(2);
-      setErrors({});
+    if (signupStep === 'account') {
+      if (validateStep1()) {
+        setSignupStep('genres');
+        setErrors({});
+      }
+      return;
+    }
+    if (signupStep === 'genres') {
+      if (validateStep2()) {
+        setSignupStep('location');
+        setErrors({});
+      }
     }
   };
 
@@ -113,6 +142,85 @@ export default function Auth() {
     if (errors.genres) {
       setErrors(prev => ({ ...prev, genres: undefined }));
     }
+  };
+
+  const handleUseLocation = () => {
+    if (!navigator.geolocation) {
+      setErrors(prev => ({ ...prev, location: 'Geolocation is not supported by your browser' }));
+      return;
+    }
+
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        setLatitude(position.coords.latitude);
+        setLongitude(position.coords.longitude);
+        setErrors(prev => ({ ...prev, location: undefined }));
+        try {
+          const params = new URLSearchParams({
+            format: 'jsonv2',
+            lat: String(position.coords.latitude),
+            lon: String(position.coords.longitude),
+            zoom: '10',
+            addressdetails: '1',
+          });
+          const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`, {
+            headers: { 'Accept-Language': 'en' },
+          });
+          if (response.ok) {
+            const data = await response.json();
+            const address = data?.address || {};
+            const detectedCity =
+              address.city ||
+              address.town ||
+              address.village ||
+              address.hamlet ||
+              address.municipality;
+            if (detectedCity) {
+              setCity(prev => (prev.trim() ? prev : String(detectedCity)));
+            }
+          }
+        } catch {
+          // Ignore reverse geocode failures; user can type manually.
+        } finally {
+          setLocating(false);
+        }
+      },
+      () => {
+        setErrors(prev => ({ ...prev, location: 'Unable to access your location. Please enter your city.' }));
+        setLocating(false);
+      }
+    );
+  };
+
+  const handlePasswordReset = async () => {
+    const emailToUse = resetEmail.trim() || email.trim();
+    const emailResult = emailSchema.safeParse(emailToUse);
+    if (!emailResult.success) {
+      setErrors(prev => ({ ...prev, email: emailResult.error.errors[0].message }));
+      return;
+    }
+
+    setResetLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(emailToUse, {
+      redirectTo: `${window.location.origin}/auth/reset-password`,
+    });
+    setResetLoading(false);
+
+    if (error) {
+      toast({
+        title: 'Reset failed',
+        description: error.message,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    toast({
+      title: 'Check your inbox',
+      description: 'We sent a password reset link to your email.',
+    });
+    setShowReset(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -141,12 +249,12 @@ export default function Auth() {
       }
     } else {
       // Signup flow
-      if (signupStep === 1) {
+      if (signupStep === 'account' || signupStep === 'genres') {
         handleNextStep();
         return;
       }
-      
-      if (!validateStep2()) return;
+
+      if (!validateStep3()) return;
 
       setLoading(true);
       try {
@@ -168,18 +276,30 @@ export default function Auth() {
           return;
         }
 
-        // Wait for session then save preferences
+        // Wait for session then save preferences and profile details
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
-          // Update profile with username if provided
-          if (username.trim()) {
+          const profileUpdates: {
+            username?: string;
+            city?: string;
+            latitude?: number | null;
+            longitude?: number | null;
+          } = {};
+
+          if (username.trim()) profileUpdates.username = username.trim();
+          if (city.trim()) profileUpdates.city = city.trim();
+          if (latitude !== null && longitude !== null) {
+            profileUpdates.latitude = latitude;
+            profileUpdates.longitude = longitude;
+          }
+
+          if (Object.keys(profileUpdates).length > 0) {
             await supabase
               .from('profiles')
-              .update({ username: username.trim() })
+              .update(profileUpdates)
               .eq('user_id', session.user.id);
           }
 
-          // Save genre preferences
           const preferences = selectedGenres.map(genre => ({
             user_id: session.user.id,
             genre,
@@ -205,13 +325,13 @@ export default function Auth() {
 
   const resetToLogin = () => {
     setMode('login');
-    setSignupStep(1);
+    setSignupStep('account');
     setErrors({});
   };
 
   const resetToSignup = () => {
     setMode('signup');
-    setSignupStep(1);
+    setSignupStep('account');
     setErrors({});
   };
 
@@ -242,7 +362,7 @@ export default function Auth() {
         {/* Auth Card */}
         <div className="card-neon rounded-2xl border border-border/50 p-6 backdrop-blur-xl">
           {/* Mode Toggle - Only show for step 1 */}
-          {(mode === 'login' || signupStep === 1) && (
+          {(mode === 'login' || signupStep === 'account') && (
             <div className="flex bg-muted rounded-lg p-1 mb-6">
               <button
                 onClick={resetToLogin}
@@ -270,8 +390,9 @@ export default function Auth() {
           {/* Step indicator for signup */}
           {mode === 'signup' && (
             <div className="flex items-center justify-center gap-2 mb-6">
-              <div className={`w-2 h-2 rounded-full transition-all ${signupStep === 1 ? 'bg-primary w-6' : 'bg-muted-foreground/50'}`} />
-              <div className={`w-2 h-2 rounded-full transition-all ${signupStep === 2 ? 'bg-primary w-6' : 'bg-muted-foreground/50'}`} />
+              <div className={`w-2 h-2 rounded-full transition-all ${signupStep === 'account' ? 'bg-primary w-6' : 'bg-muted-foreground/50'}`} />
+              <div className={`w-2 h-2 rounded-full transition-all ${signupStep === 'genres' ? 'bg-primary w-6' : 'bg-muted-foreground/50'}`} />
+              <div className={`w-2 h-2 rounded-full transition-all ${signupStep === 'location' ? 'bg-primary w-6' : 'bg-muted-foreground/50'}`} />
             </div>
           )}
 
@@ -285,39 +406,89 @@ export default function Auth() {
                   exit={{ opacity: 0, x: 20 }}
                   className="space-y-4"
                 >
-                  <div>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                      <Input
-                        type="email"
-                        placeholder="Email address"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        className="pl-10 h-12 bg-muted border-border/50 focus:border-primary input-glow"
-                      />
-                    </div>
-                    {errors.email && (
-                      <p className="text-destructive text-xs mt-1">{errors.email}</p>
-                    )}
-                  </div>
+                  {showReset ? (
+                    <>
+                      <div>
+                        <div className="relative">
+                          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                          <Input
+                            type="email"
+                            placeholder="Email address"
+                            value={resetEmail}
+                            onChange={(e) => setResetEmail(e.target.value)}
+                            className="pl-10 h-12 bg-muted border-border/50 focus:border-primary input-glow"
+                          />
+                        </div>
+                        {errors.email && (
+                          <p className="text-destructive text-xs mt-1">{errors.email}</p>
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="neon"
+                        className="w-full h-12"
+                        onClick={handlePasswordReset}
+                        disabled={resetLoading}
+                      >
+                        {resetLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Send reset link'}
+                      </Button>
+                      <button
+                        type="button"
+                        onClick={() => setShowReset(false)}
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        Back to login
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <div className="relative">
+                          <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                          <Input
+                            type="email"
+                            placeholder="Email address"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            className="pl-10 h-12 bg-muted border-border/50 focus:border-primary input-glow"
+                          />
+                        </div>
+                        {errors.email && (
+                          <p className="text-destructive text-xs mt-1">{errors.email}</p>
+                        )}
+                      </div>
 
-                  <div>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                      <Input
-                        type="password"
-                        placeholder="Password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="pl-10 h-12 bg-muted border-border/50 focus:border-primary input-glow"
-                      />
-                    </div>
-                    {errors.password && (
-                      <p className="text-destructive text-xs mt-1">{errors.password}</p>
-                    )}
-                  </div>
+                      <div>
+                        <div className="relative">
+                          <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                          <Input
+                            type="password"
+                            placeholder="Password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="pl-10 h-12 bg-muted border-border/50 focus:border-primary input-glow"
+                          />
+                        </div>
+                        {errors.password && (
+                          <p className="text-destructive text-xs mt-1">{errors.password}</p>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowReset(true);
+                          setResetEmail(email);
+                          setErrors(prev => ({ ...prev, email: undefined }));
+                        }}
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        Forgot password?
+                      </button>
+                    </>
+                  )}
                 </motion.div>
-              ) : signupStep === 1 ? (
+              ) : signupStep === 'account' ? (
                 <motion.div
                   key="signup-step1"
                   initial={{ opacity: 0, x: -20 }}
@@ -386,7 +557,7 @@ export default function Auth() {
                     )}
                   </div>
                 </motion.div>
-              ) : (
+              ) : signupStep === 'genres' ? (
                 <motion.div
                   key="signup-step2"
                   initial={{ opacity: 0, x: 20 }}
@@ -399,7 +570,7 @@ export default function Auth() {
                       <Music className="w-6 h-6 text-secondary" />
                     </div>
                     <h3 className="font-display font-semibold text-lg">What's your vibe?</h3>
-                    <p className="text-muted-foreground text-sm">Choose up to 3 genres that define your sound</p>
+                    <p className="text-muted-foreground text-sm">Choose up to 3 genres</p>
                   </div>
 
                   {/* Selection counter */}
@@ -430,15 +601,73 @@ export default function Auth() {
                     <p className="text-destructive text-xs text-center">{errors.genres}</p>
                   )}
                 </motion.div>
+              ) : (
+                <motion.div
+                  key="signup-step3"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="space-y-4"
+                >
+                  <div className="text-center mb-4">
+                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-primary/30 to-secondary/30 mb-3">
+                      <MapPin className="w-6 h-6 text-primary" />
+                    </div>
+                    <h3 className="font-display font-semibold text-lg">Where are you based?</h3>
+                    <p className="text-muted-foreground text-sm">Choose your hometown so we can find events around you.</p>
+                  </div>
+
+                  <div>
+                    <Input
+                      type="text"
+                      placeholder="City / Hometown"
+                      value={city}
+                      onChange={(e) => {
+                        setCity(e.target.value);
+                        if (errors.location) {
+                          setErrors(prev => ({ ...prev, location: undefined }));
+                        }
+                      }}
+                      className="h-12 bg-muted border-border/50 focus:border-primary input-glow"
+                    />
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleUseLocation}
+                    disabled={locating}
+                    className="w-full h-12"
+                  >
+                    {locating ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      'Use my current location'
+                    )}
+                  </Button>
+
+                  {(latitude !== null && longitude !== null) && (
+                    <p className="text-xs text-muted-foreground text-center">
+                      Location saved from your device.
+                    </p>
+                  )}
+
+                  {errors.location && (
+                    <p className="text-destructive text-xs text-center">{errors.location}</p>
+                  )}
+                </motion.div>
               )}
             </AnimatePresence>
 
             <div className="flex gap-2">
-              {mode === 'signup' && signupStep === 2 && (
+              {mode === 'signup' && signupStep !== 'account' && (
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setSignupStep(1)}
+                  onClick={() => {
+                    setErrors({});
+                    setSignupStep(signupStep === 'genres' ? 'account' : 'genres');
+                  }}
                   className="h-12"
                 >
                   <ChevronLeft className="w-4 h-4" />
@@ -447,7 +676,12 @@ export default function Auth() {
               
               <Button
                 type="submit"
-                disabled={loading || (mode === 'signup' && signupStep === 2 && selectedGenres.length === 0)}
+                disabled={
+                  loading ||
+                  (mode === 'login' && showReset) ||
+                  (mode === 'signup' && signupStep === 'genres' && selectedGenres.length === 0) ||
+                  (mode === 'signup' && signupStep === 'location' && !city.trim() && (latitude === null || longitude === null))
+                }
                 className="flex-1 h-12"
                 variant="neon"
               >
@@ -455,9 +689,14 @@ export default function Auth() {
                   <Loader2 className="w-5 h-5 animate-spin" />
                 ) : mode === 'login' ? (
                   'Login'
-                ) : signupStep === 1 ? (
+                ) : signupStep === 'account' ? (
                   <>
                     Next
+                    <ChevronRight className="w-4 h-4 ml-1" />
+                  </>
+                ) : signupStep === 'genres' ? (
+                  <>
+                    Continue
                     <ChevronRight className="w-4 h-4 ml-1" />
                   </>
                 ) : (
@@ -469,9 +708,14 @@ export default function Auth() {
               </Button>
             </div>
             
-            {mode === 'signup' && signupStep === 2 && selectedGenres.length === 0 && (
+            {mode === 'signup' && signupStep === 'genres' && selectedGenres.length === 0 && (
               <p className="text-xs text-muted-foreground text-center mt-2">
                 Select at least 1 genre to continue
+              </p>
+            )}
+            {mode === 'signup' && signupStep === 'location' && !city.trim() && (latitude === null || longitude === null) && (
+              <p className="text-xs text-muted-foreground text-center mt-2">
+                Enter a city or use your current location to continue
               </p>
             )}
           </form>
