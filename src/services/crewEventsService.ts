@@ -11,11 +11,12 @@ export async function getCrewMemberCount(crewId: string) {
 
 export async function getCrewEventPinCounts(crewId: string, eventIds: string[]) {
   if (eventIds.length === 0) return {};
+  const uniqueIds = Array.from(new Set(eventIds));
   const { data } = await supabase
     .from('crew_event_pins')
     .select('event_id')
     .eq('crew_id', crewId)
-    .in('event_id', eventIds);
+    .in('event_id', uniqueIds);
 
   const counts: Record<string, number> = {};
   (data || []).forEach((row) => {
@@ -26,12 +27,13 @@ export async function getCrewEventPinCounts(crewId: string, eventIds: string[]) 
 
 export async function getCrewEventPinsForUser(crewId: string, eventIds: string[], userId: string) {
   if (eventIds.length === 0) return new Set<string>();
+  const uniqueIds = Array.from(new Set(eventIds));
   const { data } = await supabase
     .from('crew_event_pins')
     .select('event_id')
     .eq('crew_id', crewId)
     .eq('user_id', userId)
-    .in('event_id', eventIds);
+    .in('event_id', uniqueIds);
 
   return new Set((data || []).map((row) => row.event_id));
 }
@@ -55,21 +57,33 @@ export async function unpinCrewEvent(crewId: string, eventId: string, userId: st
     .eq('user_id', userId);
 }
 
-export async function getCrewBoardEvents(crewId: string) {
+export async function getCrewPinnedEvents(crewId: string, requiredPins: number) {
+  const { data: pins } = await supabase
+    .from('crew_event_pins')
+    .select('event_id')
+    .eq('crew_id', crewId);
+
+  const counts: Record<string, number> = {};
+  (pins || []).forEach((row) => {
+    counts[row.event_id] = (counts[row.event_id] || 0) + 1;
+  });
+
+  const eligibleIds = Object.entries(counts)
+    .filter(([, count]) => count >= requiredPins)
+    .map(([eventId]) => eventId);
+
+  if (eligibleIds.length === 0) return [];
+
   const { data } = await supabase
-    .from('crew_events')
-    .select(
-      'event_id, created_at, events:event_id (id, external_id, name, description, city, venue_name, start_datetime, end_datetime, latitude, longitude, min_price, image_url, event_type, genres, source)'
-    )
-    .eq('crew_id', crewId)
-    .order('created_at', { ascending: false });
+    .from('events')
+    .select('id, external_id, name, description, city, venue_name, start_datetime, end_datetime, latitude, longitude, min_price, image_url, event_type, genres, source')
+    .in('id', eligibleIds);
 
   if (!data) return [];
 
   return data
     .map((row: any) => {
-      if (!row.events) return null;
-      const event = row.events;
+      const event = row;
       const mapped: ExternalEvent = {
         id: event.external_id ?? event.id,
         supabaseId: event.id,
@@ -91,4 +105,4 @@ export async function getCrewBoardEvents(crewId: string) {
       return mapped;
     })
     .filter(Boolean) as ExternalEvent[];
-}
+}\r\n\r\nexport async function removeCrewEventFromCrew(crewId: string, eventId: string) {\r\n  await supabase\r\n    .from('crew_event_pins')\r\n    .delete()\r\n    .eq('crew_id', crewId)\r\n    .eq('event_id', eventId);\r\n\r\n  await supabase\r\n    .from('crew_events')\r\n    .delete()\r\n    .eq('crew_id', crewId)\r\n    .eq('event_id', eventId);\r\n}\r\n

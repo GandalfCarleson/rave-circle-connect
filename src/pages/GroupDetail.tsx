@@ -16,8 +16,9 @@ import { supabase } from '@/integrations/supabase/client';
 import {
   getCrewEventPinCounts,
   getCrewEventPinsForUser,
-  getCrewBoardEvents,
+  getCrewPinnedEvents,
   pinCrewEvent,
+  removeCrewEventFromCrew,
   unpinCrewEvent,
 } from '@/services/crewEventsService';
 import type { ExternalEvent } from '@/services/externalEventsService';
@@ -117,7 +118,7 @@ export default function GroupDetail() {
       fetchGroup();
       fetchMessages();
       fetchMembers();
-      fetchCrewBoardEvents();
+      fetchCrewPinnedEvents();
 
       // Set up realtime subscription
       const channel = supabase
@@ -229,22 +230,6 @@ export default function GroupDetail() {
         )
         .subscribe();
 
-      const boardChannel = supabase
-        .channel(`crew-board-${groupId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'crew_events',
-            filter: `crew_id=eq.${groupId}`,
-          },
-          () => {
-            fetchCrewBoardEvents();
-          }
-        )
-        .subscribe();
-
       const readsChannel = supabase
         .channel(`group-reads-${groupId}`)
         .on(
@@ -266,7 +251,6 @@ export default function GroupDetail() {
         supabase.removeChannel(presenceChannel);
         supabase.removeChannel(activeChannel);
         supabase.removeChannel(pinChannel);
-        supabase.removeChannel(boardChannel);
         supabase.removeChannel(readsChannel);
         if (activeIntervalId) window.clearInterval(activeIntervalId);
       };
@@ -439,6 +423,8 @@ export default function GroupDetail() {
 
   const toggleReaction = async (messageId: string, emoji: string) => {
     if (!user) return;
+    const targetMessage = messages.find((message) => message.id === messageId);
+    if (!targetMessage || targetMessage.retracted_at) return;
     const currentReactions = reactionsByMessage[messageId] || [];
     const alreadyReacted = currentReactions.some(
       reaction => reaction.emoji === emoji && reaction.reactedByUser
@@ -465,10 +451,12 @@ export default function GroupDetail() {
     setOpenReactionPickerId(null);
   };
 
-  const closeMessageMenus = () => {
+  const closeMessageMenus = (keepMessage = false) => {
     setContextMenuPos(null);
     setActionSheetOpen(false);
-    setActionMessage(null);
+    if (!keepMessage) {
+      setActionMessage(null);
+    }
   };
 
   const openMessageMenu = (message: Message, mode: 'sheet' | 'context', position?: { x: number; y: number }) => {
@@ -516,6 +504,14 @@ export default function GroupDetail() {
     pointerStartRef.current = null;
   };
 
+  const removeEventFromCrew = async (message: Message) => {
+    if (!groupId || !message.attached_event_id) return;
+    await removeCrewEventFromCrew(groupId, message.attached_event_id);
+    refreshCrewPins(messageEventIdsRef.current);
+    toast({ title: 'Event removed from crew' });
+    closeMessageMenus();
+  };
+
   const handleMessageContextMenu = (message: Message, event: ReactMouseEvent) => {
     event.preventDefault();
     const menuWidth = 210;
@@ -523,6 +519,68 @@ export default function GroupDetail() {
     const x = Math.min(event.clientX, window.innerWidth - menuWidth - 12);
     const y = Math.min(event.clientY, window.innerHeight - menuHeight - 12);
     openMessageMenu(message, 'context', { x, y });
+  };
+
+  const getMessageMenuItems = (message: Message) => {
+    const isOwnMessage = message.user_id === user?.id;
+    const isTextMessage = message.message_type === 'text';
+    const isRetracted = Boolean(message.retracted_at);
+    const isEventMessage = Boolean(message.attached_event_id) || message.message_type === 'event';
+    const currentRole = members.find((member) => member.user_id === user?.id)?.role || '';
+    const canManageEvents = isEventMessage && (isOwnMessage || currentRole === 'owner' || currentRole === 'admin');
+
+    return [
+      {
+        key: 'reply',
+        label: 'Reply',
+        icon: Reply,
+        onClick: () => handleReply(message),
+      },
+      {
+        key: 'react',
+        label: 'React',
+        icon: Smile,
+        onClick: () => {
+          if (isRetracted) return;
+          setOpenReactionPickerId(message.id);
+          closeMessageMenus();
+        },
+        hidden: isRetracted,
+      },
+      {
+        key: 'edit',
+        label: 'Edit',
+        icon: Pencil,
+        onClick: () => handleEdit(message),
+        hidden: !isOwnMessage || !isTextMessage || isRetracted,
+      },
+      {
+        key: 'copy',
+        label: 'Copy',
+        icon: Copy,
+        onClick: () => handleCopyMessage(message),
+        hidden: !message.text,
+      },
+      {
+        key: 'remove_event',
+        label: 'Remove from Events',
+        icon: Trash2,
+        onClick: () => removeEventFromCrew(message),
+        hidden: !canManageEvents,
+        destructive: true,
+      },
+      {
+        key: 'retract',
+        label: 'Retract',
+        icon: Trash2,
+        onClick: () => {
+          setConfirmRetractOpen(true);
+          closeMessageMenus(true);
+        },
+        hidden: !isOwnMessage || isRetracted,
+        destructive: true,
+      },
+    ].filter((item) => !item.hidden);
   };
 
   const handleCopyMessage = async (message: Message) => {
@@ -538,14 +596,14 @@ export default function GroupDetail() {
   };
 
   const handleEdit = (message: Message) => {
-    if (!message.text) return;
+    if (!message.text || message.retracted_at) return;
     setEditingMessageId(message.id);
     setEditText(message.text);
     closeMessageMenus();
   };
 
   const saveEdit = async (message: Message) => {
-    if (!editText.trim()) return;
+    if (!editText.trim() || message.retracted_at) return;
     const { error } = await supabase
       .from('messages')
       .update({
@@ -582,6 +640,10 @@ export default function GroupDetail() {
         .from('message_reactions')
         .delete()
         .eq('message_id', message.id);
+      if (message.attached_event_id && groupId) {
+        await removeCrewEventFromCrew(groupId, message.attached_event_id);
+        refreshCrewPins(messageEventIdsRef.current);
+      }
       toast({ title: 'Message retracted' });
       fetchMessages();
       fetchReactions();
@@ -660,9 +722,9 @@ export default function GroupDetail() {
     setCrewPinnedByUser(pinnedByUser);
   };
 
-  const fetchCrewBoardEvents = async () => {
+  const fetchCrewPinnedEvents = async (pinsRequired: number = requiredPins) => {
     if (!groupId) return;
-    const events = await getCrewBoardEvents(groupId);
+    const events = await getCrewPinnedEvents(groupId, pinsRequired);
     setCrewBoardEvents(events);
   };
 
@@ -704,7 +766,7 @@ export default function GroupDetail() {
       title: wasPinned ? 'Pin removed' : 'Pinned',
     });
     refreshCrewPins(messageEventIdsRef.current);
-    fetchCrewBoardEvents();
+    fetchCrewPinnedEvents();
   };
 
   const sendMessage = async () => {
@@ -757,6 +819,7 @@ export default function GroupDetail() {
 
   const memberCount = Math.max(1, members.length);
   const requiredPins = Math.max(1, Math.ceil(memberCount * 0.6));
+  const messageMenuItems = actionMessage ? getMessageMenuItems(actionMessage) : [];
   const replyMessage = replyToMessageId
     ? messages.find((message) => message.id === replyToMessageId)
     : null;
@@ -808,7 +871,7 @@ export default function GroupDetail() {
               </div>
               <p className="text-xs text-muted-foreground">
                 {members.length} {members.length === 1 ? 'member' : 'members'}
-                {group.city && ` • ${group.city}`}
+                {group.city && ` - ${group.city}`}
               </p>
             </div>
           </div>
@@ -837,6 +900,13 @@ export default function GroupDetail() {
                 const replyTarget = message.reply_to_message_id
                   ? messages.find((item) => item.id === message.reply_to_message_id)
                   : null;
+                const replyPreview = message.reply_to_message_id ? {
+                  text: replyTarget
+                    ? (replyTarget.text || 'Shared an event')
+                    : 'Original message unavailable',
+                  senderName: replyTarget?.sender_name,
+                  isRetracted: Boolean(replyTarget?.retracted_at),
+                } : undefined;
                 const readReceipt = lastMessageByCurrentUser?.id === message.id
                   ? seenCount > 0
                     ? `Seen by ${seenCount}`
@@ -881,11 +951,7 @@ export default function GroupDetail() {
                         messageType={message.message_type || 'text'}
                         isRetracted={Boolean(message.retracted_at)}
                         editedAt={message.edited_at}
-                        replyPreview={replyTarget ? {
-                          text: replyTarget.text || 'Shared an event',
-                          senderName: replyTarget.sender_name,
-                          isRetracted: Boolean(replyTarget.retracted_at),
-                        } : undefined}
+                        replyPreview={replyPreview}
                         onReplyPreviewClick={() => {
                           if (replyTarget?.id) {
                             messageRefs.current[replyTarget.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -946,7 +1012,7 @@ export default function GroupDetail() {
                       onClick={() => setReplyToMessageId(null)}
                       className="ml-2 text-muted-foreground hover:text-foreground"
                     >
-                      ✕
+                      x
                     </button>
                   </div>
                 )}
@@ -1076,116 +1142,41 @@ export default function GroupDetail() {
             style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
             onClick={(event) => event.stopPropagation()}
           >
-            <button
-              type="button"
-              onClick={() => handleReply(actionMessage)}
-              className="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-muted/40 flex items-center gap-2"
-            >
-              <Reply className="w-4 h-4" />
-              Reply
-            </button>
-            {!actionMessage.retracted_at && (
-              <button
-                type="button"
-                onClick={() => {
-                  setOpenReactionPickerId(actionMessage.id);
-                  closeMessageMenus();
-                }}
-                className="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-muted/40 flex items-center gap-2"
-              >
-                <Smile className="w-4 h-4" />
-                React
-              </button>
-            )}
-            {actionMessage.user_id === user?.id && actionMessage.message_type === 'text' && !actionMessage.retracted_at && (
-              <button
-                type="button"
-                onClick={() => handleEdit(actionMessage)}
-                className="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-muted/40 flex items-center gap-2"
-              >
-                <Pencil className="w-4 h-4" />
-                Edit
-              </button>
-            )}
-            {actionMessage.text && (
-              <button
-                type="button"
-                onClick={() => handleCopyMessage(actionMessage)}
-                className="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-muted/40 flex items-center gap-2"
-              >
-                <Copy className="w-4 h-4" />
-                Copy
-              </button>
-            )}
-            {actionMessage.user_id === user?.id && !actionMessage.retracted_at && (
-              <button
-                type="button"
-                onClick={() => setConfirmRetractOpen(true)}
-                className="w-full text-left px-3 py-2 rounded-md text-sm text-destructive hover:bg-destructive/10 flex items-center gap-2"
-              >
-                <Trash2 className="w-4 h-4" />
-                Retract
-              </button>
-            )}
+            {messageMenuItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={item.onClick}
+                  className={`w-full text-left px-3 py-2 rounded-md text-sm hover:bg-muted/40 flex items-center gap-2${item.destructive ? ' text-destructive hover:bg-destructive/10' : ''}`}
+                >
+                  <Icon className="w-4 h-4" />
+                  {item.label}
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
-
       {actionSheetOpen && actionMessage && (
         <div className="fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/60" onClick={closeMessageMenus} />
           <div className="absolute bottom-0 left-0 right-0 card-neon border border-border/60 rounded-t-2xl bg-card/95 backdrop-blur-sm p-4 space-y-3">
-            <button
-              type="button"
-              onClick={() => handleReply(actionMessage)}
-              className="w-full text-left px-4 py-3 rounded-lg text-sm hover:bg-muted/30 flex items-center gap-2"
-            >
-              <Reply className="w-4 h-4" />
-              Reply
-            </button>
-            {!actionMessage.retracted_at && (
-              <button
-                type="button"
-                onClick={() => {
-                  setOpenReactionPickerId(actionMessage.id);
-                  closeMessageMenus();
-                }}
-                className="w-full text-left px-4 py-3 rounded-lg text-sm hover:bg-muted/30 flex items-center gap-2"
-              >
-                <Smile className="w-4 h-4" />
-                React
-              </button>
-            )}
-            {actionMessage.user_id === user?.id && actionMessage.message_type === 'text' && !actionMessage.retracted_at && (
-              <button
-                type="button"
-                onClick={() => handleEdit(actionMessage)}
-                className="w-full text-left px-4 py-3 rounded-lg text-sm hover:bg-muted/30 flex items-center gap-2"
-              >
-                <Pencil className="w-4 h-4" />
-                Edit
-              </button>
-            )}
-            {actionMessage.text && (
-              <button
-                type="button"
-                onClick={() => handleCopyMessage(actionMessage)}
-                className="w-full text-left px-4 py-3 rounded-lg text-sm hover:bg-muted/30 flex items-center gap-2"
-              >
-                <Copy className="w-4 h-4" />
-                Copy
-              </button>
-            )}
-            {actionMessage.user_id === user?.id && !actionMessage.retracted_at && (
-              <button
-                type="button"
-                onClick={() => setConfirmRetractOpen(true)}
-                className="w-full text-left px-4 py-3 rounded-lg text-sm text-destructive hover:bg-destructive/10 flex items-center gap-2"
-              >
-                <Trash2 className="w-4 h-4" />
-                Retract
-              </button>
-            )}
+            {messageMenuItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={item.onClick}
+                  className={`w-full text-left px-4 py-3 rounded-lg text-sm hover:bg-muted/30 flex items-center gap-2${item.destructive ? ' text-destructive hover:bg-destructive/10' : ''}`}
+                >
+                  <Icon className="w-4 h-4" />
+                  {item.label}
+                </button>
+              );
+            })}
             <button
               type="button"
               onClick={closeMessageMenus}
@@ -1196,7 +1187,6 @@ export default function GroupDetail() {
           </div>
         </div>
       )}
-
       <Dialog open={confirmRetractOpen} onOpenChange={setConfirmRetractOpen}>
         <DialogContent className="bg-card border-border">
           <DialogHeader>
@@ -1225,3 +1215,47 @@ export default function GroupDetail() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

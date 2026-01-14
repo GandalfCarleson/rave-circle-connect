@@ -64,7 +64,8 @@ export function MessageBubble({
   readReceipt,
 }: MessageBubbleProps) {
   const formattedTime = format(new Date(timestamp), 'HH:mm');
-  const pickerEmojis = ['👍', '😂', '🔥', '❤️', '🎉'];
+  const pickerEmojis = [':)', ':D', '<3', ';)', '!!'];
+  const hasBubbleContent = Boolean(text) || Boolean(replyPreview);
 
   if (messageType === 'system') {
     return (
@@ -101,7 +102,7 @@ export function MessageBubble({
             <p className="text-sm text-muted-foreground">Message retracted</p>
           </div>
         ) : (
-          text && (
+          hasBubbleContent && (
             <div className={cn('message-bubble', isSent ? 'sent' : 'received')}>
               {replyPreview && (
                 <button
@@ -118,7 +119,7 @@ export function MessageBubble({
                   </span>
                 </button>
               )}
-              <p className="text-sm">{text}</p>
+              {text && <p className="text-sm">{text}</p>}
               {editedAt && (
                 <span className="text-[10px] text-muted-foreground block mt-1">edited</span>
               )}
@@ -211,3 +212,5 @@ export function MessageBubble({
     </div>
   );
 }
+
+
