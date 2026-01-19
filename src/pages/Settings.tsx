@@ -10,7 +10,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { AnimatedBackground } from '@/components/AnimatedBackground';
 
 export default function Settings() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, isDevMode, resetDevSession } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [currentPassword, setCurrentPassword] = useState('');
@@ -117,44 +117,65 @@ export default function Settings() {
       </div>
 
       <div className="max-w-lg mx-auto px-4 py-6 space-y-6 relative z-10">
-        <section className="card-neon rounded-xl border border-border/50 p-6">
-          <h2 className="font-display font-semibold mb-4">Change Password</h2>
-          <form onSubmit={handleChangePassword} className="space-y-4">
-            <div>
-              <Label htmlFor="current-password">Current password</Label>
-              <Input
-                id="current-password"
-                type="password"
-                value={currentPassword}
-                onChange={(e) => setCurrentPassword(e.target.value)}
-                className="mt-1.5 bg-muted border-border/50"
-              />
-            </div>
-            <div>
-              <Label htmlFor="new-password">New password</Label>
-              <Input
-                id="new-password"
-                type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                className="mt-1.5 bg-muted border-border/50"
-              />
-            </div>
-            <div>
-              <Label htmlFor="confirm-password">Confirm new password</Label>
-              <Input
-                id="confirm-password"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="mt-1.5 bg-muted border-border/50"
-              />
-            </div>
-            <Button type="submit" variant="neon" className="w-full" disabled={saving}>
-              {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Update password'}
+        {!isDevMode && (
+          <section className="card-neon rounded-xl border border-border/50 p-6">
+            <h2 className="font-display font-semibold mb-4">Change Password</h2>
+            <form onSubmit={handleChangePassword} className="space-y-4">
+              <div>
+                <Label htmlFor="current-password">Current password</Label>
+                <Input
+                  id="current-password"
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  className="mt-1.5 bg-muted border-border/50"
+                />
+              </div>
+              <div>
+                <Label htmlFor="new-password">New password</Label>
+                <Input
+                  id="new-password"
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="mt-1.5 bg-muted border-border/50"
+                />
+              </div>
+              <div>
+                <Label htmlFor="confirm-password">Confirm new password</Label>
+                <Input
+                  id="confirm-password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="mt-1.5 bg-muted border-border/50"
+                />
+              </div>
+              <Button type="submit" variant="neon" className="w-full" disabled={saving}>
+                {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Update password'}
+              </Button>
+            </form>
+          </section>
+        )}
+
+        {isDevMode && (
+          <section className="card-neon rounded-xl border border-border/50 p-6">
+            <h2 className="font-display font-semibold mb-2">Dev Session</h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Reset the local dev user and return to signup.
+            </p>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                resetDevSession();
+                navigate('/auth');
+              }}
+            >
+              Reset Dev Session
             </Button>
-          </form>
-        </section>
+          </section>
+        )}
 
         <section className="card-neon rounded-xl border border-border/50 p-6 opacity-70">
           <h2 className="font-display font-semibold mb-2">Coming soon</h2>

@@ -31,7 +31,7 @@ interface ProfileData {
 const BIO_MAX_LENGTH = 200;
 
 export default function Profile() {
-  const { user, loading: authLoading, signOut } = useAuth();
+  const { user, loading: authLoading, signOut, isDevMode, devProfile, updateDevProfile, setDevGenres } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [profile, setProfile] = useState<ProfileData>({
@@ -55,11 +55,27 @@ export default function Profile() {
   }, [user, authLoading, navigate]);
 
   useEffect(() => {
+    if (isDevMode) {
+      setProfile({
+        name: devProfile?.name || '',
+        username: devProfile?.username || '',
+        avatar_url: devProfile?.avatar_url ?? null,
+        bio: devProfile?.bio || '',
+        city: devProfile?.city || '',
+        radius_km: devProfile?.radius_km ?? 50,
+        is_discoverable: devProfile?.is_discoverable ?? true,
+        show_events_on_profile: devProfile?.show_events_on_profile ?? true,
+      });
+      setSelectedGenres(devProfile?.genres || []);
+      setLoading(false);
+      return;
+    }
+
     if (user) {
       fetchProfile();
       fetchGenres();
     }
-  }, [user]);
+  }, [user, isDevMode, devProfile]);
 
   const fetchProfile = async () => {
     if (!user) return;
@@ -101,7 +117,12 @@ export default function Profile() {
   const updateProfile = async (updates: Partial<ProfileData>) => {
     if (!user) return;
     setProfile(prev => ({ ...prev, ...updates }));
-    
+
+    if (isDevMode) {
+      updateDevProfile(updates);
+      return;
+    }
+
     await supabase
       .from('profiles')
       .update(updates)
@@ -110,16 +131,26 @@ export default function Profile() {
 
   const toggleGenre = async (genre: string) => {
     if (!user) return;
-    
+
     if (selectedGenres.includes(genre)) {
-      setSelectedGenres(prev => prev.filter(g => g !== genre));
+      const next = selectedGenres.filter(g => g !== genre);
+      setSelectedGenres(next);
+      if (isDevMode) {
+        setDevGenres(next);
+        return;
+      }
       await supabase
         .from('user_preferences')
         .delete()
         .eq('user_id', user.id)
         .eq('genre', genre);
     } else {
-      setSelectedGenres(prev => [...prev, genre]);
+      const next = [...selectedGenres, genre];
+      setSelectedGenres(next);
+      if (isDevMode) {
+        setDevGenres(next);
+        return;
+      }
       await supabase
         .from('user_preferences')
         .insert({ user_id: user.id, genre, intensity: 3 });
@@ -129,7 +160,25 @@ export default function Profile() {
   const saveProfile = async () => {
     if (!user) return;
     setSaving(true);
-    
+
+    if (isDevMode) {
+      updateDevProfile({
+        name: profile.name,
+        username: profile.username,
+        bio: profile.bio,
+        city: profile.city,
+        radius_km: profile.radius_km,
+        is_discoverable: profile.is_discoverable,
+        show_events_on_profile: profile.show_events_on_profile,
+      });
+      toast({
+        title: 'Profile saved!',
+        description: 'Your changes have been saved locally',
+      });
+      setSaving(false);
+      return;
+    }
+
     const { error } = await supabase
       .from('profiles')
       .update({
@@ -404,3 +453,10 @@ export default function Profile() {
     </div>
   );
 }
+
+
+
+
+
+
+

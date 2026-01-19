@@ -105,4 +105,20 @@ export async function getCrewPinnedEvents(crewId: string, requiredPins: number) 
       return mapped;
     })
     .filter(Boolean) as ExternalEvent[];
-}\r\n\r\nexport async function removeCrewEventFromCrew(crewId: string, eventId: string) {\r\n  await supabase\r\n    .from('crew_event_pins')\r\n    .delete()\r\n    .eq('crew_id', crewId)\r\n    .eq('event_id', eventId);\r\n\r\n  await supabase\r\n    .from('crew_events')\r\n    .delete()\r\n    .eq('crew_id', crewId)\r\n    .eq('event_id', eventId);\r\n}\r\n
+}
+
+export async function removeCrewEventFromCrew(crewId: string, eventId: string) {
+  await supabase
+    .from('crew_event_pins')
+    .delete()
+    .eq('crew_id', crewId)
+    .eq('event_id', eventId);
+
+  await supabase
+    .from('crew_events')
+    .delete()
+    .eq('crew_id', crewId)
+    .eq('event_id', eventId);
+}
+
+

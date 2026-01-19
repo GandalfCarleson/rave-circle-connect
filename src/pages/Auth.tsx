@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, Lock, User, Loader2, Zap, Music, MapPin, ChevronRight, ChevronLeft } from 'lucide-react';
@@ -35,7 +35,17 @@ export default function Auth() {
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string; name?: string; genres?: string; location?: string }>({});
 
-  const { signIn, signUp, user } = useAuth();
+  const {
+    signIn,
+    signUp,
+    user,
+    isDevMode,
+    enableDevMode,
+    disableDevMode,
+    resetDevSession,
+    updateDevProfile,
+    setDevGenres,
+  } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -276,9 +286,33 @@ export default function Auth() {
           return;
         }
 
+        if (isDevMode) {
+          updateDevProfile({
+            name: name.trim() || undefined,
+            username: username.trim() || undefined,
+            city: city.trim() || undefined,
+            latitude,
+            longitude,
+          });
+          setDevGenres(selectedGenres);
+          toast({
+            title: 'Dev signup complete',
+            description: 'Dev session created locally.',
+          });
+          return;
+        }
         // Wait for session then save preferences and profile details
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
+        let { data: { session } } = await supabase.auth.getSession();
+
+        if (!session?.user) {
+          toast({
+            title: 'Check your email',
+            description: 'Confirm your email to finish signup.',
+          });
+          return;
+        }
+
+        if (session.user) {
           const profileUpdates: {
             username?: string;
             city?: string;
@@ -329,6 +363,31 @@ export default function Auth() {
     setErrors({});
   };
 
+  const logoTapCountRef = useRef(0);
+  const logoTapTimeoutRef = useRef<number | null>(null);
+
+  const handleLogoTap = () => {
+    if (!import.meta.env.DEV) return;
+    logoTapCountRef.current += 1;
+    if (logoTapTimeoutRef.current) {
+      window.clearTimeout(logoTapTimeoutRef.current);
+    }
+    logoTapTimeoutRef.current = window.setTimeout(() => {
+      logoTapCountRef.current = 0;
+    }, 1200);
+
+    if (logoTapCountRef.current >= 7) {
+      logoTapCountRef.current = 0;
+      if (isDevMode) {
+        disableDevMode();
+        resetDevSession();
+        toast({ title: 'Dev mode disabled' });
+      } else {
+        enableDevMode();
+        toast({ title: 'Dev mode enabled' });
+      }
+    }
+  };
   const resetToSignup = () => {
     setMode('signup');
     setSignupStep('account');
@@ -359,6 +418,26 @@ export default function Auth() {
           <p className="text-muted-foreground mt-2">Your crew, your events, your vibe</p>
         </div>
 
+        {import.meta.env.DEV && (
+          <div className="text-center mb-6">
+            <button
+              type="button"
+              onClick={() => {
+                if (isDevMode) {
+                  disableDevMode();
+                  resetDevSession();
+                  toast({ title: 'Dev mode disabled' });
+                } else {
+                  enableDevMode();
+                  toast({ title: 'Dev mode enabled' });
+                }
+              }}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              {isDevMode ? 'Disable Dev Mode' : 'Enable Dev Mode'}
+            </button>
+          </div>
+        )}
         {/* Auth Card */}
         <div className="card-neon rounded-2xl border border-border/50 p-6 backdrop-blur-xl">
           {/* Mode Toggle - Only show for step 1 */}
@@ -720,6 +799,20 @@ export default function Auth() {
             )}
           </form>
 
+          {import.meta.env.DEV && isDevMode && (
+            <div className="mt-6 pt-4 border-t border-border/50">
+              <button
+                type="button"
+                onClick={() => {
+                  resetDevSession();
+                  resetToSignup();
+                }}
+                className="w-full text-xs text-muted-foreground hover:text-foreground"
+              >
+                Reset Dev Session
+              </button>
+            </div>
+          )}
           {/* Meta OAuth Placeholder */}
           <div className="mt-6 pt-6 border-t border-border/50">
             <Button
@@ -730,7 +823,7 @@ export default function Auth() {
               <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/>
               </svg>
-              Continue with Meta – coming soon
+              Continue with Meta ??? coming soon
             </Button>
             <p className="text-center text-xs text-muted-foreground mt-2">
               Facebook & Instagram login coming soon
@@ -741,3 +834,23 @@ export default function Auth() {
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

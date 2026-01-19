@@ -71,3 +71,11 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+
+## Dev Mode (local only)
+
+- Tap the logo 7 times on the auth screen to toggle Dev Mode (dev builds only).
+- In Dev Mode, signup and profile changes are stored locally and do not hit Supabase.
+- Use Reset Dev Session in Settings or the auth screen to clear the mock user.
+- A small DEV MODE pill appears in the UI when active.
+
