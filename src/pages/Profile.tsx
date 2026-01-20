@@ -9,7 +9,6 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { GenreChip } from '@/components/GenreChip';
 import { RadiusSlider } from '@/components/RadiusSlider';
-import { BottomNav } from '@/components/BottomNav';
 import { AnimatedBackground } from '@/components/AnimatedBackground';
 import { AvatarUpload } from '@/components/AvatarUpload';
 import { useAuth } from '@/hooks/useAuth';
@@ -221,7 +220,7 @@ export default function Profile() {
   }
 
   return (
-    <div className="min-h-screen gradient-bg pb-24">
+    <div className="min-h-screen gradient-bg">
       <AnimatedBackground />
       
       {/* Header */}
@@ -449,12 +448,9 @@ export default function Profile() {
         </Button>
       </div>
 
-      <BottomNav />
     </div>
   );
 }
-
-
 
 
 

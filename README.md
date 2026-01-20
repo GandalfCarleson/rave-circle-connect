@@ -79,3 +79,18 @@ Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/c
 - Use Reset Dev Session in Settings or the auth screen to clear the mock user.
 - A small DEV MODE pill appears in the UI when active.
 
+## Account deletion function
+
+This app ships a Supabase Edge Function for deleting accounts.
+
+Run it locally:
+
+```sh
+supabase functions serve delete-account --env-file ./supabase/.env.local
+```
+
+Deploy it:
+
+```sh
+supabase functions deploy delete-account
+```

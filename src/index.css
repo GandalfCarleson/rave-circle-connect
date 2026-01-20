@@ -74,12 +74,20 @@
     --sidebar-accent-foreground: 0 0% 95%;
     --sidebar-border: 240 10% 16%;
     --sidebar-ring: 300 75% 55%;
+
+    --bottom-nav-height: 72px;
   }
 }
 
 @layer base {
   * {
     @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
   }
 
   body {
@@ -150,6 +158,25 @@
     background: linear-gradient(180deg, hsl(240 10% 5% / 0.95) 0%, hsl(240 10% 4%) 100%);
     backdrop-filter: blur(20px);
     border-top: 1px solid hsl(var(--border) / 0.5);
+    padding-bottom: env(safe-area-inset-bottom);
+    height: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
+  }
+
+  .app-shell {
+    position: relative;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .app-shell__content {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+  }
+
+  .app-shell__content--with-nav {
+    padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
   }
 
   .nav-item {

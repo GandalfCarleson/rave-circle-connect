@@ -16,7 +16,7 @@ export function BottomNav() {
 
   return (
     <nav className="bottom-nav relative">
-      <div className="flex items-center justify-around py-2 max-w-lg mx-auto">
+      <div className="flex items-center justify-around h-full py-2 max-w-lg mx-auto">
         {navItems.map((item) => {
           const isActive = location.pathname === item.path;
           const Icon = item.icon;
@@ -56,5 +56,4 @@ export function BottomNav() {
     </nav>
   );
 }
-
 

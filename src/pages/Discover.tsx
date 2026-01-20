@@ -5,7 +5,6 @@ import { Compass, Users, Calendar, TrendingUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GroupCard } from '@/components/GroupCard';
 import { EventCard } from '@/components/EventCard';
-import { BottomNav } from '@/components/BottomNav';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { fetchEventsWithFallback, type ExternalEvent, ensureSupabaseEvents } from '@/services/externalEventsService';
@@ -485,7 +484,7 @@ export default function Discover() {
   }
 
   return (
-    <div className="min-h-screen gradient-bg pb-24">
+    <div className="min-h-screen gradient-bg">
       {/* Header */}
       <div className="sticky top-0 z-40 glass border-b border-border/50">
         <div className="max-w-lg mx-auto px-4 py-4">
@@ -749,7 +748,6 @@ export default function Discover() {
         </DialogContent>
       </Dialog>
 
-      <BottomNav />
     </div>
   );
 }

@@ -8,7 +8,6 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { GroupCard } from '@/components/GroupCard';
-import { BottomNav } from '@/components/BottomNav';
 import { AnimatedBackground } from '@/components/AnimatedBackground';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -468,7 +467,7 @@ export default function Groups() {
   );
 
   return (
-    <div className="min-h-screen gradient-bg pb-24">
+    <div className="min-h-screen gradient-bg">
       <AnimatedBackground />
       
       {/* Header */}
@@ -734,7 +733,6 @@ export default function Groups() {
         </DialogContent>
       </Dialog>
 
-      <BottomNav />
     </div>
   );
 }

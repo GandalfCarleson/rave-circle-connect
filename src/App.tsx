@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
+import { AppShell } from "@/components/AppShell";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Feed from "./pages/Feed";
@@ -29,15 +30,17 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/auth" element={<Auth />} />
-            <Route path="/feed" element={<Feed />} />
-            <Route path="/groups" element={<Groups />} />
-            <Route path="/groups/:id" element={<GroupDetail />} />
-            <Route path="/discover" element={<Discover />} />
-            <Route path="/profile" element={<Profile />} />
-            <Route path="/profile/saved" element={<SavedEvents />} />
-            <Route path="/settings" element={<Settings />} />
             <Route path="/auth/reset-password" element={<ResetPassword />} />
-            <Route path="/events/:id" element={<EventDetail />} />
+            <Route element={<AppShell />}>
+              <Route path="/feed" element={<Feed />} />
+              <Route path="/groups" element={<Groups />} />
+              <Route path="/groups/:id" element={<GroupDetail />} />
+              <Route path="/discover" element={<Discover />} />
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/profile/saved" element={<SavedEvents />} />
+              <Route path="/settings" element={<Settings />} />
+              <Route path="/events/:id" element={<EventDetail />} />
+            </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

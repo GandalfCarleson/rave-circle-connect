@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { BottomNav } from '@/components/BottomNav';
 import { AnimatedBackground } from '@/components/AnimatedBackground';
 import { EventCard } from '@/components/EventCard';
 import { useAuth } from '@/hooks/useAuth';
@@ -57,7 +56,7 @@ export default function SavedEvents() {
   }
 
   return (
-    <div className="min-h-screen gradient-bg pb-24">
+    <div className="min-h-screen gradient-bg">
       <AnimatedBackground />
       <div className="sticky top-0 z-40 glass border-b border-border/50">
         <div className="max-w-lg mx-auto px-4 py-4 flex items-center gap-3">
@@ -94,7 +93,6 @@ export default function SavedEvents() {
         )}
       </div>
 
-      <BottomNav />
     </div>
   );
 }

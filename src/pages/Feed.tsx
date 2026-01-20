@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button';
 import { EventCard } from '@/components/EventCard';
 import { GenreChip } from '@/components/GenreChip';
 import { RadiusSlider } from '@/components/RadiusSlider';
-import { BottomNav } from '@/components/BottomNav';
 import { AnimatedBackground } from '@/components/AnimatedBackground';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -557,7 +556,7 @@ export default function Feed() {
   }
 
   return (
-    <div className="min-h-screen gradient-bg pb-24">
+    <div className="min-h-screen gradient-bg">
       <AnimatedBackground />
       
       {/* Header */}
@@ -874,7 +873,6 @@ export default function Feed() {
         </DialogContent>
       </Dialog>
 
-      <BottomNav />
     </div>
   );
 }
