@@ -62,6 +62,10 @@ export default function Groups() {
   const longPressTimerRef = useRef<number | null>(null);
   const longPressTriggeredRef = useRef(false);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const typingChannelsRef = useRef<Map<string, ReturnType<typeof supabase.channel>>>(new Map());
+  const [typingByGroup, setTypingByGroup] = useState<Record<string, Record<string, { expiresAt: number; name: string }>>>({});
+  const presenceChannelsRef = useRef<Map<string, ReturnType<typeof supabase.channel>>>(new Map());
+  const [onlineByGroup, setOnlineByGroup] = useState<Record<string, string[]>>({});
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -75,47 +79,156 @@ export default function Groups() {
     }
   }, [user]);
 
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel(`group-members-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'group_members',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          fetchGroups();
+        }
+      )
+      .subscribe();
+
+    const handleFocus = () => {
+      fetchGroups();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      supabase.removeChannel(channel);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const activeGroups = new Set(groups.map(group => group.id));
+    typingChannelsRef.current.forEach((channel, groupId) => {
+      if (!activeGroups.has(groupId)) {
+        supabase.removeChannel(channel);
+        typingChannelsRef.current.delete(groupId);
+      }
+    });
+
+    groups.forEach((group) => {
+      if (typingChannelsRef.current.has(group.id)) return;
+      const channel = supabase
+        .channel(`typing-${group.id}`, { config: { broadcast: { self: false } } })
+        .on('broadcast', { event: 'typing' }, ({ payload }) => {
+          const userId = payload?.user_id as string | undefined;
+          const isTyping = payload?.typing as boolean | undefined;
+          if (!userId) return;
+          const userName = (payload?.user_name as string | undefined) || 'Someone';
+          setTypingByGroup((prev) => {
+            const nextGroup = { ...(prev[group.id] || {}) };
+            if (isTyping) {
+              nextGroup[userId] = { expiresAt: Date.now() + 2500, name: userName };
+            } else {
+              delete nextGroup[userId];
+            }
+            return {
+              ...prev,
+              [group.id]: nextGroup,
+            };
+          });
+        })
+        .subscribe();
+      typingChannelsRef.current.set(group.id, channel);
+    });
+
+    return () => {
+      typingChannelsRef.current.forEach((channel) => supabase.removeChannel(channel));
+      typingChannelsRef.current.clear();
+    };
+  }, [user, groups]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setTypingByGroup((prev) => {
+        const next: Record<string, Record<string, { expiresAt: number; name: string }>> = {};
+        Object.keys(prev).forEach((groupId) => {
+          const entries = Object.entries(prev[groupId] || {}).filter(([, entry]) => entry.expiresAt > Date.now());
+          if (entries.length > 0) {
+            next[groupId] = Object.fromEntries(entries);
+          }
+        });
+        return next;
+      });
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const activeGroups = new Set(groups.map(group => group.id));
+    presenceChannelsRef.current.forEach((channel, groupId) => {
+      if (!activeGroups.has(groupId)) {
+        supabase.removeChannel(channel);
+        presenceChannelsRef.current.delete(groupId);
+        setOnlineByGroup((prev) => {
+          const next = { ...prev };
+          delete next[groupId];
+          return next;
+        });
+      }
+    });
+
+    groups.forEach((group) => {
+      if (presenceChannelsRef.current.has(group.id)) return;
+      const channel = supabase
+        .channel(`presence-group-${group.id}`, {
+          config: { presence: { key: user.id } },
+        })
+        .on('presence', { event: 'sync' }, () => {
+          const state = channel.presenceState();
+          const onlineIds = Object.keys(state).filter((id) => id !== user.id);
+          setOnlineByGroup((prev) => ({
+            ...prev,
+            [group.id]: onlineIds,
+          }));
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            await channel.track({ online_at: new Date().toISOString() });
+          }
+        });
+      presenceChannelsRef.current.set(group.id, channel);
+    });
+
+    const intervalId = window.setInterval(() => {
+      presenceChannelsRef.current.forEach((channel) => {
+        channel.track({ online_at: new Date().toISOString() });
+      });
+    }, 30000);
+
+    return () => {
+      window.clearInterval(intervalId);
+      presenceChannelsRef.current.forEach((channel) => supabase.removeChannel(channel));
+      presenceChannelsRef.current.clear();
+    };
+  }, [user, groups]);
+
   const fetchGroups = async () => {
     if (!user) return;
     setLoading(true);
     
     try {
-      const { data: memberships, error: memberError } = await supabase
-        .from('group_members')
-        .select('group_id, role, groups:group_id (id, name, city, is_private, image_url, owner_id, created_at)')
-        .eq('user_id', user.id);
+      const { data: groupRows, error: groupError } = await supabase.rpc('get_user_groups');
+      if (groupError) throw groupError;
 
-      if (memberError) throw memberError;
-
-      if (memberships && memberships.length > 0) {
-        console.log('Crew memberships', memberships);
-        const groupIds = memberships
-          .map((membership) => membership.group_id)
-          .filter(Boolean);
-
-        let groupsData = memberships
-          .map((membership) => {
-            if (!membership.groups) return null;
-            return {
-              ...membership.groups,
-              role: membership.role ?? null,
-            } as Group;
-          })
-          .filter((group): group is Group => Boolean(group && group.id));
-
-        if (groupsData.length === 0 && groupIds.length > 0) {
-          const { data: fallbackGroups } = await supabase
-            .from('groups')
-            .select('*')
-            .in('id', groupIds);
-          groupsData = (fallbackGroups || []).map((group) => ({
-            ...group,
-            role: memberships.find((membership) => membership.group_id === group.id)?.role ?? null,
-          }));
-        }
+      if (groupRows && groupRows.length > 0) {
+        const groupIds = groupRows.map((group) => group.id);
 
         const groupsWithCounts = await Promise.all(
-          groupsData.map(async (group) => {
+          groupRows.map(async (group) => {
             const { count } = await supabase
               .from('group_members')
               .select('*', { count: 'exact', head: true })
@@ -123,7 +236,7 @@ export default function Groups() {
             return {
               ...group,
               member_count: count || 0,
-            };
+            } as Group;
           })
         );
 
@@ -593,8 +706,31 @@ export default function Groups() {
                   city={group.city || undefined}
                   isPrivate={group.is_private}
                   activityText={group.last_activity_preview || undefined}
+                  activityNode={
+                    (() => {
+                      const groupTyping = typingByGroup[group.id] || {};
+                      const activeTypers = Object.entries(groupTyping)
+                        .filter(([id, entry]) => id !== user?.id && entry.expiresAt > Date.now());
+                      if (activeTypers.length === 0) return undefined;
+                      const typers = activeTypers.map(([, entry]) => entry.name || 'Someone');
+                      const label = typers.length === 1
+                        ? `${typers[0]} is typing`
+                        : `${typers[0]} + ${typers.length - 1} more are typing`;
+                      return (
+                        <div className="flex items-center gap-2">
+                          <span>{label}</span>
+                          <div className="typing-indicator" aria-hidden="true">
+                            <span className="typing-dot" />
+                            <span className="typing-dot" />
+                            <span className="typing-dot" />
+                          </div>
+                        </div>
+                      );
+                    })()
+                  }
                   activityTimestamp={formatActivityTime(group.last_activity_at)}
                   imageUrl={group.image_url || undefined}
+                  onlineCount={(onlineByGroup[group.id] || []).length}
                   onClick={() => {
                     if (longPressTriggeredRef.current) {
                       longPressTriggeredRef.current = false;

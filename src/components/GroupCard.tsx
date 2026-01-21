@@ -9,8 +9,10 @@ interface GroupCardProps {
   city?: string;
   isPrivate: boolean;
   activityText?: string;
+  activityNode?: ReactNode;
   activityTimestamp?: string;
   imageUrl?: string;
+  onlineCount?: number;
   onClick?: () => void;
   action?: ReactNode;
 }
@@ -20,8 +22,10 @@ export function GroupCard({
   city,
   isPrivate,
   activityText,
+  activityNode,
   activityTimestamp,
   imageUrl,
+  onlineCount,
   onClick,
   action,
 }: GroupCardProps) {
@@ -42,6 +46,9 @@ export function GroupCard({
               <Users className="w-6 h-6 text-primary" />
             </div>
           )}
+          {onlineCount && onlineCount > 0 && (
+            <span className="presence-dot" />
+          )}
         </div>
 
         {/* Group Info */}
@@ -55,7 +62,9 @@ export function GroupCard({
             )}
           </div>
           <div className="mt-1 flex items-center justify-between gap-2 text-sm text-muted-foreground">
-            <p className="truncate">{activityText || 'No messages yet'}</p>
+            <div className="truncate">
+              {activityNode || activityText || 'No messages yet'}
+            </div>
             {activityTimestamp && (
               <span className="text-xs text-muted-foreground/70 whitespace-nowrap">{activityTimestamp}</span>
             )}

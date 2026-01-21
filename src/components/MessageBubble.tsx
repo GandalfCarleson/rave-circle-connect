@@ -20,8 +20,7 @@ interface MessageBubbleProps {
   onReplyPreviewClick?: () => void;
   reactions?: { emoji: string; count: number; reactedByUser?: boolean }[];
   onToggleReaction?: (emoji: string) => void;
-  onTogglePicker?: () => void;
-  showReactionPicker?: boolean;
+  onReactClick?: () => void;
   attachedEvent?: {
     id: string;
     name: string;
@@ -53,8 +52,7 @@ export function MessageBubble({
   onReplyPreviewClick,
   reactions,
   onToggleReaction,
-  onTogglePicker,
-  showReactionPicker,
+  onReactClick,
   attachedEvent,
   onViewEvent,
   isPinned,
@@ -64,7 +62,6 @@ export function MessageBubble({
   readReceipt,
 }: MessageBubbleProps) {
   const formattedTime = format(new Date(timestamp), 'HH:mm');
-  const pickerEmojis = [':)', ':D', '<3', ';)', '!!'];
   const hasBubbleContent = Boolean(text) || Boolean(replyPreview);
 
   if (messageType === 'system') {
@@ -127,21 +124,6 @@ export function MessageBubble({
           )
         )}
 
-        {showReactionPicker && (
-          <div className="flex items-center gap-2 bg-muted/80 px-2 py-1 rounded-full">
-            {pickerEmojis.map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                onClick={() => onToggleReaction?.(emoji)}
-                className="text-sm hover:scale-110 transition-transform"
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        )}
-
         {attachedEvent && !isRetracted && (
           <div className="max-w-[280px] relative">
             {messageType === 'event' && (
@@ -194,10 +176,10 @@ export function MessageBubble({
         )}
 
         <div className="flex items-center gap-2 px-2">
-          {!isRetracted && (
+          {!isRetracted && onReactClick && (
             <button
               type="button"
-              onClick={onTogglePicker}
+              onClick={onReactClick}
               className="text-[10px] text-muted-foreground hover:text-foreground"
             >
               React
@@ -212,5 +194,3 @@ export function MessageBubble({
     </div>
   );
 }
-
-

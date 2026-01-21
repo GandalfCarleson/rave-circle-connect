@@ -39,9 +39,11 @@ interface Message {
   created_at: string;
   edited_at: string | null;
   retracted_at: string | null;
+  expires_at?: string | null;
+  is_retracted?: boolean | null;
   reply_to_message_id: string | null;
   message_type: 'text' | 'event' | 'system' | null;
-  user_id: string;
+  user_id: string | null;
   attached_event_id: string | null;
   sender_name: string;
   sender_avatar: string | null;
@@ -71,6 +73,43 @@ interface ReactionSummary {
   reactedByUser?: boolean;
 }
 
+const DEFAULT_RETRACT_TTL_SECONDS = 600;
+const MIN_RETRACT_TTL_SECONDS = 30;
+const MAX_RETRACT_TTL_SECONDS = 3600;
+
+const getRetractTtlSeconds = () => {
+  const raw = Number(import.meta.env.VITE_RETRACT_TTL_SECONDS);
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_RETRACT_TTL_SECONDS;
+  return Math.min(MAX_RETRACT_TTL_SECONDS, Math.max(MIN_RETRACT_TTL_SECONDS, raw));
+};
+
+const QUICK_REACTIONS = ['❤️', '😂', '😮', '😢', '😡', '👍'];
+const LEGACY_REACTION_MAP: Record<string, string> = {
+  ':D': '😄',
+  ':)': '😊',
+  '<3': '❤️',
+  '!!': '🔥',
+};
+
+const isSingleEmoji = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    const segments = Array.from(segmenter.segment(trimmed));
+    if (segments.length !== 1) return false;
+  }
+  return /[\p{Extended_Pictographic}]/u.test(trimmed);
+};
+
+const getDisplayName = (user: { email?: string; user_metadata?: { name?: string } } | null) => {
+  if (!user) return 'Someone';
+  const metaName = user.user_metadata?.name;
+  if (metaName && metaName.trim()) return metaName.trim();
+  if (user.email) return user.email.split('@')[0];
+  return 'Someone';
+};
+
 export default function GroupDetail() {
   const { id } = useParams<{ id: string }>();
   const groupId = id && id !== 'undefined' ? id : null;
@@ -81,7 +120,13 @@ export default function GroupDetail() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [reactionsByMessage, setReactionsByMessage] = useState<Record<string, ReactionSummary[]>>({});
-  const [openReactionPickerId, setOpenReactionPickerId] = useState<string | null>(null);
+  const [emojiPickerMessageId, setEmojiPickerMessageId] = useState<string | null>(null);
+  const [customEmoji, setCustomEmoji] = useState('');
+  const [reactionBar, setReactionBar] = useState<{ messageId: string; x: number; y: number } | null>(null);
+  const reactionBarRef = useRef<HTMLDivElement | null>(null);
+  const typingChannelRef = useRef<any>(null);
+  const typingTimeoutRef = useRef<number | null>(null);
+  const [typingUsers, setTypingUsers] = useState<Record<string, number>>({});
   const [crewPinCounts, setCrewPinCounts] = useState<Record<string, number>>({});
   const [crewPinnedByUser, setCrewPinnedByUser] = useState<Set<string>>(new Set());
   const [crewBoardEvents, setCrewBoardEvents] = useState<ExternalEvent[]>([]);
@@ -132,13 +177,27 @@ export default function GroupDetail() {
             filter: `group_id=eq.${groupId}`,
           },
           async (payload) => {
+            if (payload.eventType === 'DELETE') {
+              const oldMsg = payload.old as { id?: string } | null;
+              if (!oldMsg?.id) return;
+              setMessages(prev => prev.filter((message) => message.id !== oldMsg.id));
+              setReactionsByMessage(prev => {
+                const next = { ...prev };
+                delete next[oldMsg.id];
+                return next;
+              });
+              return;
+            }
+
             const nextMsg = payload.new as any;
             if (!nextMsg) return;
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('name, avatar_url')
-              .eq('user_id', nextMsg.user_id)
-              .single();
+            const profile = nextMsg.user_id
+              ? (await supabase
+                  .from('profiles')
+                  .select('name, avatar_url')
+                  .eq('user_id', nextMsg.user_id)
+                  .single()).data
+              : null;
 
             let attachedEvent = undefined;
             if (nextMsg.attached_event_id) {
@@ -230,6 +289,43 @@ export default function GroupDetail() {
         )
         .subscribe();
 
+      const membersChannel = supabase
+        .channel(`group-members-${groupId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'group_members',
+            filter: `group_id=eq.${groupId}`,
+          },
+          () => {
+            fetchMembers();
+          }
+        )
+        .subscribe();
+
+      const typingChannel = supabase
+        .channel(`typing-${groupId}`, {
+          config: { broadcast: { self: false } },
+        })
+        .on('broadcast', { event: 'typing' }, ({ payload }) => {
+          const userId = payload?.user_id as string | undefined;
+          const isTyping = payload?.typing as boolean | undefined;
+          if (!userId) return;
+          setTypingUsers((prev) => {
+            const next = { ...prev };
+            if (isTyping) {
+              next[userId] = Date.now() + 2500;
+            } else {
+              delete next[userId];
+            }
+            return next;
+          });
+        })
+        .subscribe();
+      typingChannelRef.current = typingChannel;
+
       const readsChannel = supabase
         .channel(`group-reads-${groupId}`)
         .on(
@@ -251,11 +347,35 @@ export default function GroupDetail() {
         supabase.removeChannel(presenceChannel);
         supabase.removeChannel(activeChannel);
         supabase.removeChannel(pinChannel);
+        supabase.removeChannel(membersChannel);
+        supabase.removeChannel(typingChannel);
         supabase.removeChannel(readsChannel);
         if (activeIntervalId) window.clearInterval(activeIntervalId);
       };
     }
   }, [user, groupId]);
+
+  useEffect(() => {
+    if (!user || !groupId) return;
+    runRetractedCleanup();
+    const intervalId = window.setInterval(runRetractedCleanup, 60000);
+    return () => window.clearInterval(intervalId);
+  }, [user, groupId]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setTypingUsers((prev) => {
+        const next: Record<string, number> = {};
+        Object.keys(prev).forEach((userId) => {
+          if (prev[userId] > Date.now()) {
+            next[userId] = prev[userId];
+          }
+        });
+        return next;
+      });
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -310,29 +430,11 @@ export default function GroupDetail() {
 
   const fetchGroup = async () => {
     if (!groupId) return;
-    const { data } = await supabase
-      .from('groups')
-      .select('*')
-      .eq('id', groupId)
-      .single();
-    
-    if (data) {
-      setGroup(data);
+    const { data } = await supabase.rpc('get_group_for_member', { p_group_id: groupId });
+    if (data && data.length > 0) {
+      setGroup(data[0] as Group);
       setLoading(false);
       return;
-    }
-
-    if (user) {
-      const { data: membership } = await supabase
-        .from('group_members')
-        .select('groups:group_id (id, name, description, city, is_private, image_url, owner_id)')
-        .eq('group_id', groupId)
-        .eq('user_id', user.id)
-        .single();
-
-      if (membership?.groups) {
-        setGroup(membership.groups as Group);
-      }
     }
     setLoading(false);
   };
@@ -347,7 +449,9 @@ export default function GroupDetail() {
     
     if (error || !messageRows) return;
 
-    const userIds = Array.from(new Set(messageRows.map((msg) => msg.user_id)));
+    const userIds = Array.from(
+      new Set(messageRows.map((msg) => msg.user_id).filter(Boolean) as string[])
+    );
     const eventIds = Array.from(
       new Set(messageRows.map((msg) => msg.attached_event_id).filter(Boolean) as string[])
     );
@@ -388,6 +492,10 @@ export default function GroupDetail() {
     );
   };
 
+  const runRetractedCleanup = async () => {
+    await supabase.rpc('cleanup_retracted_messages', { p_limit: 100 });
+  };
+
   const fetchReactions = async () => {
     if (!user || messages.length === 0) return;
     const messageIds = messages.map(message => message.id);
@@ -398,12 +506,13 @@ export default function GroupDetail() {
 
     const grouped: Record<string, Record<string, ReactionSummary>> = {};
     (data || []).forEach((reaction) => {
+      const normalizedEmoji = LEGACY_REACTION_MAP[reaction.emoji] || reaction.emoji;
       if (!grouped[reaction.message_id]) {
         grouped[reaction.message_id] = {};
       }
       const messageGroup = grouped[reaction.message_id];
-      const existing = messageGroup[reaction.emoji] || {
-        emoji: reaction.emoji,
+      const existing = messageGroup[normalizedEmoji] || {
+        emoji: normalizedEmoji,
         count: 0,
         reactedByUser: false,
       };
@@ -411,7 +520,7 @@ export default function GroupDetail() {
       if (reaction.user_id === user.id) {
         existing.reactedByUser = true;
       }
-      messageGroup[reaction.emoji] = existing;
+      messageGroup[normalizedEmoji] = existing;
     });
 
     const mapped: Record<string, ReactionSummary[]> = {};
@@ -423,6 +532,10 @@ export default function GroupDetail() {
 
   const toggleReaction = async (messageId: string, emoji: string) => {
     if (!user) return;
+    if (!isSingleEmoji(emoji)) {
+      toast({ title: 'Invalid reaction', description: 'Please select a valid emoji.' });
+      return;
+    }
     const targetMessage = messages.find((message) => message.id === messageId);
     if (!targetMessage || targetMessage.retracted_at) return;
     const currentReactions = reactionsByMessage[messageId] || [];
@@ -430,14 +543,13 @@ export default function GroupDetail() {
       reaction => reaction.emoji === emoji && reaction.reactedByUser
     );
 
-    if (alreadyReacted) {
-      await supabase
-        .from('message_reactions')
-        .delete()
-        .eq('message_id', messageId)
-        .eq('user_id', user.id)
-        .eq('emoji', emoji);
-    } else {
+    await supabase
+      .from('message_reactions')
+      .delete()
+      .eq('message_id', messageId)
+      .eq('user_id', user.id);
+
+    if (!alreadyReacted) {
       await supabase
         .from('message_reactions')
         .insert({
@@ -448,7 +560,19 @@ export default function GroupDetail() {
     }
 
     await fetchReactions();
-    setOpenReactionPickerId(null);
+    setReactionBar(null);
+  };
+
+  const handleCustomEmoji = async () => {
+    if (!emojiPickerMessageId) return;
+    const value = customEmoji.trim();
+    if (!isSingleEmoji(value)) {
+      toast({ title: 'Invalid emoji', description: 'Pick a single emoji.' });
+      return;
+    }
+    await toggleReaction(emojiPickerMessageId, value);
+    setCustomEmoji('');
+    setEmojiPickerMessageId(null);
   };
 
   const closeMessageMenus = (keepMessage = false) => {
@@ -479,7 +603,8 @@ export default function GroupDetail() {
     }
     longPressTimerRef.current = window.setTimeout(() => {
       longPressTriggeredRef.current = true;
-      openMessageMenu(message, 'sheet');
+      setActionMessage(message);
+      openReactionBar(message);
       if (navigator.vibrate) {
         navigator.vibrate(10);
       }
@@ -504,6 +629,40 @@ export default function GroupDetail() {
     pointerStartRef.current = null;
   };
 
+  const openReactionBar = (message: Message) => {
+    const node = messageRefs.current[message.id];
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const desiredY = rect.top - 52;
+    const y = desiredY < 8 ? rect.bottom + 8 : desiredY;
+    const x = Math.min(window.innerWidth - 40, Math.max(40, centerX));
+    setReactionBar({ messageId: message.id, x, y });
+    if (navigator.vibrate) {
+      navigator.vibrate(8);
+    }
+  };
+
+  useEffect(() => {
+    if (!reactionBar) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!reactionBarRef.current) return;
+      if (reactionBarRef.current.contains(event.target as Node)) return;
+      setReactionBar(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setReactionBar(null);
+      }
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [reactionBar]);
+
   const removeEventFromCrew = async (message: Message) => {
     if (!groupId || !message.attached_event_id) return;
     await removeCrewEventFromCrew(groupId, message.attached_event_id);
@@ -514,11 +673,7 @@ export default function GroupDetail() {
 
   const handleMessageContextMenu = (message: Message, event: ReactMouseEvent) => {
     event.preventDefault();
-    const menuWidth = 210;
-    const menuHeight = 220;
-    const x = Math.min(event.clientX, window.innerWidth - menuWidth - 12);
-    const y = Math.min(event.clientY, window.innerHeight - menuHeight - 12);
-    openMessageMenu(message, 'context', { x, y });
+    openReactionBar(message);
   };
 
   const getMessageMenuItems = (message: Message) => {
@@ -542,7 +697,7 @@ export default function GroupDetail() {
         icon: Smile,
         onClick: () => {
           if (isRetracted) return;
-          setOpenReactionPickerId(message.id);
+          openReactionBar(message);
           closeMessageMenus();
         },
         hidden: isRetracted,
@@ -627,11 +782,18 @@ export default function GroupDetail() {
 
   const handleRetract = async (message: Message) => {
     if (!user) return;
+    const now = new Date();
+    const ttlSeconds = getRetractTtlSeconds();
+    const expiresAt = new Date(now.getTime() + ttlSeconds * 1000).toISOString();
     const { error } = await supabase
       .from('messages')
       .update({
-        retracted_at: new Date().toISOString(),
+        is_retracted: true,
+        retracted_at: now.toISOString(),
+        expires_at: expiresAt,
         retracted_by: user.id,
+        text: null,
+        attached_event_id: null,
       })
       .eq('id', message.id);
 
@@ -660,19 +822,12 @@ export default function GroupDetail() {
 
   const fetchMembers = async () => {
     if (!groupId) return;
-    const { data } = await supabase
-      .from('group_members')
-      .select(`
-        *,
-        profiles:user_id (name, avatar_url)
-      `)
-      .eq('group_id', groupId);
-    
+    const { data } = await supabase.rpc('get_group_members', { p_group_id: groupId });
     if (data) {
       setMembers(data.map((m: any) => ({
         ...m,
-        name: m.profiles?.name,
-        avatar_url: m.profiles?.avatar_url,
+        name: m.name,
+        avatar_url: m.avatar_url,
       })));
     }
   };
@@ -772,6 +927,12 @@ export default function GroupDetail() {
   const sendMessage = async () => {
     if (!user || !groupId || !newMessage.trim()) return;
     setSending(true);
+    const userName = getDisplayName(user);
+    typingChannelRef.current?.send({
+      type: 'broadcast',
+      event: 'typing',
+      payload: { user_id: user.id, user_name: userName, typing: false },
+    });
 
     const { error } = await supabase
       .from('messages')
@@ -823,6 +984,7 @@ export default function GroupDetail() {
   const replyMessage = replyToMessageId
     ? messages.find((message) => message.id === replyToMessageId)
     : null;
+  const onlineCount = Array.from(onlineUsers).filter((id) => id !== user?.id).length;
   const lastMessageByCurrentUser = [...messages].reverse().find((message) => message.user_id === user?.id);
   const seenCount = lastMessageByCurrentUser
     ? Object.entries(groupReads).filter(([userId, lastReadAt]) => {
@@ -872,6 +1034,12 @@ export default function GroupDetail() {
               <p className="text-xs text-muted-foreground">
                 {members.length} {members.length === 1 ? 'member' : 'members'}
                 {group.city && ` - ${group.city}`}
+                {onlineCount > 0 && (
+                  <span className="ml-2 inline-flex items-center gap-1 text-emerald-400">
+                    <span className="presence-dot presence-dot--inline" />
+                    {onlineCount > 1 ? `${onlineCount} online` : 'Active now'}
+                  </span>
+                )}
               </p>
             </div>
           </div>
@@ -903,9 +1071,9 @@ export default function GroupDetail() {
                 const replyPreview = message.reply_to_message_id ? {
                   text: replyTarget
                     ? (replyTarget.text || 'Shared an event')
-                    : 'Original message unavailable',
+                    : 'Original message was retracted',
                   senderName: replyTarget?.sender_name,
-                  isRetracted: Boolean(replyTarget?.retracted_at),
+                  isRetracted: Boolean(replyTarget?.retracted_at || replyTarget?.is_retracted || !replyTarget),
                 } : undefined;
                 const readReceipt = lastMessageByCurrentUser?.id === message.id
                   ? seenCount > 0
@@ -949,18 +1117,19 @@ export default function GroupDetail() {
                         timestamp={message.created_at}
                         isSent={message.user_id === user?.id}
                         messageType={message.message_type || 'text'}
-                        isRetracted={Boolean(message.retracted_at)}
+                        isRetracted={Boolean(message.retracted_at || message.is_retracted)}
                         editedAt={message.edited_at}
                         replyPreview={replyPreview}
                         onReplyPreviewClick={() => {
                           if (replyTarget?.id) {
                             messageRefs.current[replyTarget.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          } else if (message.reply_to_message_id) {
+                            toast({ title: 'Original message removed' });
                           }
                         }}
                         reactions={reactionsByMessage[message.id] || []}
-                        showReactionPicker={openReactionPickerId === message.id}
-                        onTogglePicker={() => setOpenReactionPickerId(prev => prev === message.id ? null : message.id)}
                         onToggleReaction={(emoji) => toggleReaction(message.id, emoji)}
+                        onReactClick={() => openReactionBar(message)}
                         attachedEvent={message.attached_event ? {
                           id: message.attached_event.id,
                           name: message.attached_event.name,
@@ -1002,10 +1171,29 @@ export default function GroupDetail() {
           <div className="glass border-t border-border/50 p-4">
             <div className="max-w-lg mx-auto flex gap-2">
               <div className="flex-1">
-                {replyMessage && (
+                {Object.keys(typingUsers).filter((id) => id !== user?.id && typingUsers[id] > Date.now()).length > 0 && (
+                  <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+                    {(() => {
+                      const typers = Object.keys(typingUsers)
+                        .filter((id) => id !== user?.id && typingUsers[id] > Date.now())
+                        .map((id) => members.find((member) => member.user_id === id)?.name || 'Someone');
+                      if (typers.length === 1) return `${typers[0]} is typing`;
+                      if (typers.length > 1) return `${typers[0]} + ${typers.length - 1} more are typing`;
+                      return null;
+                    })()}
+                    <div className="typing-indicator" aria-hidden="true">
+                      <span className="typing-dot" />
+                      <span className="typing-dot" />
+                      <span className="typing-dot" />
+                    </div>
+                  </div>
+                )}
+                {(replyMessage || replyToMessageId) && (
                   <div className="mb-2 rounded-lg border border-border/60 bg-muted/60 px-3 py-2 text-xs text-muted-foreground flex items-center justify-between">
                     <div className="truncate">
-                      Replying to {replyMessage.sender_name}: {replyMessage.retracted_at ? 'Original message was retracted' : (replyMessage.text || 'Shared an event')}
+                      {replyMessage
+                        ? `Replying to ${replyMessage.sender_name}: ${replyMessage.retracted_at || replyMessage.is_retracted ? 'Original message was retracted' : (replyMessage.text || 'Shared an event')}`
+                        : 'Replying to: Original message was retracted'}
                     </div>
                     <button
                       type="button"
@@ -1018,7 +1206,34 @@ export default function GroupDetail() {
                 )}
                 <Input
                   value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
+                  onChange={(e) => {
+                    setNewMessage(e.target.value);
+                    if (!user) return;
+                    const userName = getDisplayName(user);
+                    typingChannelRef.current?.send({
+                      type: 'broadcast',
+                      event: 'typing',
+                      payload: { user_id: user.id, user_name: userName, typing: true },
+                    });
+                    if (typingTimeoutRef.current) {
+                      window.clearTimeout(typingTimeoutRef.current);
+                    }
+                    typingTimeoutRef.current = window.setTimeout(() => {
+                      typingChannelRef.current?.send({
+                        type: 'broadcast',
+                        event: 'typing',
+                        payload: { user_id: user.id, user_name: userName, typing: false },
+                      });
+                    }, 2000);
+                  }}
+                  onBlur={() => {
+                    const userName = getDisplayName(user);
+                    typingChannelRef.current?.send({
+                      type: 'broadcast',
+                      event: 'typing',
+                      payload: { user_id: user?.id, user_name: userName, typing: false },
+                    });
+                  }}
                   onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
                   placeholder="Type a message..."
                   className="bg-muted border-border/50"
@@ -1128,6 +1343,57 @@ export default function GroupDetail() {
         </TabsContent>
       </Tabs>
 
+      {reactionBar && (
+        <div
+          ref={reactionBarRef}
+          className="reaction-bar"
+          style={{ left: `${reactionBar.x}px`, top: `${reactionBar.y}px` }}
+        >
+          {QUICK_REACTIONS.map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              onClick={() => {
+                if (navigator.vibrate) {
+                  navigator.vibrate(6);
+                }
+                toggleReaction(reactionBar.messageId, emoji);
+              }}
+              className="reaction-bar__item"
+            >
+              {emoji}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="reaction-bar__item"
+            onClick={() => {
+              setEmojiPickerMessageId(reactionBar.messageId);
+              setReactionBar(null);
+            }}
+            aria-label="More reactions"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            className="reaction-bar__item"
+            onClick={() => {
+              const target = messages.find((message) => message.id === reactionBar.messageId);
+              if (!target) return;
+              setReactionBar(null);
+              openMessageMenu(target, 'context', {
+                x: Math.max(12, reactionBar.x - 110),
+                y: reactionBar.y + 44,
+              });
+            }}
+            aria-label="Message actions"
+          >
+            ⋯
+          </button>
+        </div>
+      )}
+
       {contextMenuPos && actionMessage && (
         <div
           className="fixed inset-0 z-50"
@@ -1212,47 +1478,44 @@ export default function GroupDetail() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={Boolean(emojiPickerMessageId)} onOpenChange={(open) => {
+        if (!open) {
+          setEmojiPickerMessageId(null);
+          setCustomEmoji('');
+        }
+      }}>
+        <DialogContent className="bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="font-display">Add reaction</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Pick a single emoji using your keyboard.
+            </p>
+            <Input
+              value={customEmoji}
+              onChange={(event) => setCustomEmoji(event.target.value)}
+              placeholder="😀"
+              className="bg-muted border-border/50 text-center text-2xl"
+            />
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => {
+                setEmojiPickerMessageId(null);
+                setCustomEmoji('');
+              }}>
+                Cancel
+              </Button>
+              <Button variant="neon" className="flex-1" onClick={handleCustomEmoji}>
+                Add
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

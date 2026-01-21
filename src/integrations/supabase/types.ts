@@ -257,8 +257,10 @@ export type Database = {
           attached_event_id: string | null
           created_at: string | null
           edited_at: string | null
+          expires_at: string | null
           group_id: string
           id: string
+          is_retracted: boolean | null
           message_type: Database["public"]["Enums"]["message_type"] | null
           retracted_at: string | null
           retracted_by: string | null
@@ -270,8 +272,10 @@ export type Database = {
           attached_event_id?: string | null
           created_at?: string | null
           edited_at?: string | null
+          expires_at?: string | null
           group_id: string
           id?: string
+          is_retracted?: boolean | null
           message_type?: Database["public"]["Enums"]["message_type"] | null
           retracted_at?: string | null
           retracted_by?: string | null
@@ -283,8 +287,10 @@ export type Database = {
           attached_event_id?: string | null
           created_at?: string | null
           edited_at?: string | null
+          expires_at?: string | null
           group_id?: string
           id?: string
+          is_retracted?: boolean | null
           message_type?: Database["public"]["Enums"]["message_type"] | null
           retracted_at?: string | null
           retracted_by?: string | null

@@ -94,3 +94,13 @@ Deploy it:
 ```sh
 supabase functions deploy delete-account
 ```
+
+## Retracted message cleanup
+
+A scheduled Edge Function removes expired retracted messages.
+
+Deploy it:
+
+```sh
+supabase functions deploy cleanup-retracted-messages --no-verify-jwt
+```

@@ -191,6 +191,91 @@
     filter: drop-shadow(0 0 6px hsl(var(--primary) / 0.6));
   }
 
+  .typing-indicator {
+    @apply flex items-center gap-1;
+  }
+
+  .typing-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: hsl(var(--muted-foreground));
+    opacity: 0.5;
+    animation: typing-bounce 1.2s infinite ease-in-out;
+  }
+
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+
+  @keyframes typing-bounce {
+    0%, 80%, 100% {
+      transform: translateY(0);
+      opacity: 0.5;
+    }
+    40% {
+      transform: translateY(-3px);
+      opacity: 1;
+    }
+  }
+
+  .reaction-bar {
+    @apply fixed z-50 flex items-center gap-2 px-3 py-2 rounded-full border border-border/60 bg-card/95 backdrop-blur;
+    transform: translateX(-50%);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+    animation: reaction-pop 0.15s ease-out;
+  }
+
+  .reaction-bar__item {
+    @apply w-8 h-8 flex items-center justify-center rounded-full text-lg transition-transform;
+  }
+
+  .reaction-bar__item:hover {
+    transform: translateY(-2px) scale(1.05);
+    background: hsl(var(--muted));
+  }
+
+  @keyframes reaction-pop {
+    from {
+      opacity: 0;
+      transform: translateX(-50%) scale(0.9);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(-50%) scale(1);
+    }
+  }
+
+  .presence-dot {
+    @apply absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border border-background;
+    background: #34d399;
+    box-shadow: 0 0 8px rgba(52, 211, 153, 0.8);
+    animation: presence-pulse 2s ease-in-out infinite;
+  }
+
+  .presence-dot--inline {
+    position: static;
+    width: 6px;
+    height: 6px;
+    border: none;
+    box-shadow: 0 0 6px rgba(52, 211, 153, 0.7);
+  }
+
+  @keyframes presence-pulse {
+    0%, 100% {
+      transform: scale(1);
+      opacity: 0.9;
+    }
+    50% {
+      transform: scale(1.2);
+      opacity: 0.5;
+    }
+  }
+
   /* Message bubble */
   .message-bubble {
     @apply rounded-2xl px-4 py-2.5 max-w-[80%];
