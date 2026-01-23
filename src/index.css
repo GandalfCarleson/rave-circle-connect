@@ -78,6 +78,8 @@
     --bottom-nav-height: 72px;
     --bottom-nav-h: var(--bottom-nav-height);
     --composer-h: 84px;
+    --group-header-h: 72px;
+    --group-tabs-h: 56px;
   }
 }
 
@@ -181,12 +183,6 @@
     padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
   }
 
-  .group-chat__sticky {
-    position: sticky;
-    top: 0;
-    z-index: 20;
-  }
-
   .group-chat {
     height: 100dvh;
     overflow: hidden;
@@ -195,7 +191,28 @@
     min-height: 0;
   }
 
+  .group-chat__header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 40;
+    background: hsl(var(--background) / 0.9);
+    backdrop-filter: blur(10px);
+  }
+
+  .group-chat__tabs {
+    position: fixed;
+    top: var(--group-header-h);
+    left: 0;
+    right: 0;
+    z-index: 30;
+    padding-top: 9px;
+  }
+
   .group-chat__messages {
+    padding-top: calc(var(--group-header-h) + var(--group-tabs-h) + 12px);
+    scroll-padding-top: calc(var(--group-header-h) + var(--group-tabs-h) + 12px);
     padding-bottom: calc(var(--composer-height, var(--composer-h)) + var(--bottom-nav-h) + env(safe-area-inset-bottom) + 16px);
     scroll-padding-bottom: calc(var(--composer-height, var(--composer-h)) + var(--bottom-nav-h) + env(safe-area-inset-bottom) + 16px);
     position: relative;
