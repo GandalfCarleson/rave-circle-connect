@@ -80,6 +80,7 @@
     --composer-h: 84px;
     --group-header-h: 72px;
     --group-tabs-h: 56px;
+    --group-overlay-h: calc(var(--group-header-h) + var(--group-tabs-h) + env(safe-area-inset-top) + 20px);
   }
 }
 
@@ -183,12 +184,22 @@
     padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
   }
 
+  .app-shell__content:has(.group-chat) {
+    overflow: hidden;
+    height: 100%;
+  }
+
+  .app-shell__content:has(.group-chat) .group-chat {
+    height: 100%;
+  }
+
   .group-chat {
     height: 100dvh;
     overflow: hidden;
     display: flex;
     flex-direction: column;
     min-height: 0;
+    padding-top: 120px;
   }
 
   .group-chat__header {
@@ -211,10 +222,16 @@
   }
 
   .group-chat__messages {
-    padding-top: calc(var(--group-header-h) + var(--group-tabs-h) + 12px);
-    scroll-padding-top: calc(var(--group-header-h) + var(--group-tabs-h) + 12px);
-    padding-bottom: calc(var(--composer-height, var(--composer-h)) + var(--bottom-nav-h) + env(safe-area-inset-bottom) + 16px);
-    scroll-padding-bottom: calc(var(--composer-height, var(--composer-h)) + var(--bottom-nav-h) + env(safe-area-inset-bottom) + 16px);
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    max-height: calc(100dvh - var(--group-overlay-h) - var(--composer-height, var(--composer-h)) - var(--bottom-nav-h) - env(safe-area-inset-bottom));
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    padding-top: var(--group-overlay-h) !important;
+    scroll-padding-top: var(--group-overlay-h) !important;
+    padding-bottom: calc(var(--composer-height, var(--composer-h)) + var(--bottom-nav-h) + env(safe-area-inset-bottom) + 16px) !important;
+    scroll-padding-bottom: calc(var(--composer-height, var(--composer-h)) + var(--bottom-nav-h) + env(safe-area-inset-bottom) + 16px) !important;
     position: relative;
     z-index: 10;
   }
