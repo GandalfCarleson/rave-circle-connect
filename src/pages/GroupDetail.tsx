@@ -145,6 +145,8 @@ export default function GroupDetail() {
   const [sending, setSending] = useState(false);
   const [inviteUsername, setInviteUsername] = useState('');
   const [inviting, setInviting] = useState(false);
+  const groupChatRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageEventIdsRef = useRef<string[]>([]);
   const longPressTimerRef = useRef<number | null>(null);
@@ -400,6 +402,27 @@ export default function GroupDetail() {
       setReactionsByMessage({});
     }
   }, [messages]);
+
+  // Keep the scroll padding in sync with the fixed composer height.
+  useEffect(() => {
+    const root = groupChatRef.current;
+    const composer = composerRef.current;
+    if (!root || !composer) return;
+
+    const updateHeight = () => {
+      root.style.setProperty('--composer-height', `${composer.offsetHeight}px`);
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(() => updateHeight());
+    observer.observe(composer);
+    window.addEventListener('resize', updateHeight);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateHeight);
+    };
+  }, []);
 
 
   useEffect(() => {
@@ -1010,7 +1033,7 @@ export default function GroupDetail() {
   }
 
   return (
-    <div className="min-h-screen gradient-bg flex flex-col">
+    <div ref={groupChatRef} className="group-chat gradient-bg">
       {/* Header */}
       <div className="sticky top-0 z-40 glass border-b border-border/50">
         <div className="max-w-lg mx-auto px-4 py-4">
@@ -1047,8 +1070,8 @@ export default function GroupDetail() {
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="chat" className="flex-1 flex flex-col">
-        <div className="max-w-lg mx-auto w-full px-4 pt-2">
+        <Tabs defaultValue="chat" className="flex-1 flex flex-col min-h-0">
+          <div className="max-w-lg mx-auto w-full px-4 pt-2 flex-shrink-0">
           <TabsList className="w-full bg-muted">
             <TabsTrigger value="chat" className="flex-1">Chat</TabsTrigger>
             <TabsTrigger value="events" className="flex-1">Events</TabsTrigger>
@@ -1058,7 +1081,7 @@ export default function GroupDetail() {
 
         {/* Chat Tab */}
         <TabsContent value="chat" className="flex-1 flex flex-col m-0">
-          <div className="flex-1 overflow-y-auto max-w-lg mx-auto w-full px-4 py-4">
+          <div className="group-chat__messages flex-1 min-h-0 overflow-y-auto max-w-lg mx-auto w-full px-4 py-4">
             {messages.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 <p>No messages yet. Start the conversation!</p>
@@ -1168,7 +1191,7 @@ export default function GroupDetail() {
           </div>
 
           {/* Message Input */}
-          <div className="glass border-t border-border/50 p-4">
+          <div ref={composerRef} className="group-chat__composer glass border-t border-border/50 p-4">
             <div className="max-w-lg mx-auto flex gap-2">
               <div className="flex-1">
                 {Object.keys(typingUsers).filter((id) => id !== user?.id && typingUsers[id] > Date.now()).length > 0 && (
@@ -1516,9 +1539,5 @@ export default function GroupDetail() {
     </div>
   );
 }
-
-
-
-
 
 
