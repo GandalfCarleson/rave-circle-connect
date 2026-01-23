@@ -76,6 +76,8 @@
     --sidebar-ring: 300 75% 55%;
 
     --bottom-nav-height: 72px;
+    --bottom-nav-h: var(--bottom-nav-height);
+    --composer-h: 84px;
   }
 }
 
@@ -159,7 +161,7 @@
     backdrop-filter: blur(20px);
     border-top: 1px solid hsl(var(--border) / 0.5);
     padding-bottom: env(safe-area-inset-bottom);
-    height: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
+    height: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom));
   }
 
   .app-shell {
@@ -179,6 +181,12 @@
     padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
   }
 
+  .group-chat__sticky {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+
   .group-chat {
     height: 100dvh;
     overflow: hidden;
@@ -188,15 +196,19 @@
   }
 
   .group-chat__messages {
-    padding-bottom: calc(var(--composer-height, 0px) + var(--bottom-nav-height) + env(safe-area-inset-bottom) + 8px);
+    padding-bottom: calc(var(--composer-height, var(--composer-h)) + var(--bottom-nav-h) + env(safe-area-inset-bottom) + 16px);
+    scroll-padding-bottom: calc(var(--composer-height, var(--composer-h)) + var(--bottom-nav-h) + env(safe-area-inset-bottom) + 16px);
+    position: relative;
+    z-index: 10;
   }
 
   .group-chat__composer {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom));
-    z-index: 60;
+    bottom: calc(var(--bottom-nav-h) + env(safe-area-inset-bottom));
+    height: var(--composer-height, var(--composer-h));
+    z-index: 30;
   }
 
   .nav-item {

@@ -1069,14 +1069,15 @@ export default function GroupDetail() {
         </div>
       </div>
 
-      {/* Tabs */}
-        <Tabs defaultValue="chat" className="flex-1 flex flex-col min-h-0">
-          <div className="max-w-lg mx-auto w-full px-4 pt-2 flex-shrink-0">
-          <TabsList className="w-full bg-muted">
-            <TabsTrigger value="chat" className="flex-1">Chat</TabsTrigger>
-            <TabsTrigger value="events" className="flex-1">Events</TabsTrigger>
-            <TabsTrigger value="members" className="flex-1">Members</TabsTrigger>
-          </TabsList>
+      <Tabs defaultValue="chat" className="flex-1 flex flex-col min-h-0">
+        <div className="sticky top-[72px] z-30 bg-transparent">
+          <div className="max-w-lg mx-auto w-full px-4 pb-2">
+            <TabsList className="w-full bg-muted">
+              <TabsTrigger value="chat" className="flex-1">Chat</TabsTrigger>
+              <TabsTrigger value="events" className="flex-1">Events</TabsTrigger>
+              <TabsTrigger value="members" className="flex-1">Members</TabsTrigger>
+            </TabsList>
+          </div>
         </div>
 
         {/* Chat Tab */}
@@ -1539,5 +1540,3 @@ export default function GroupDetail() {
     </div>
   );
 }
-
-
