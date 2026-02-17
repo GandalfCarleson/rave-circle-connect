@@ -1,6 +1,24 @@
 import { supabase } from '@/integrations/supabase/client';
 import type { ExternalEvent } from '@/services/externalEventsService';
 
+type EventRow = {
+  id: string;
+  external_id: string | null;
+  source: string | null;
+  name: string;
+  description: string | null;
+  city: string | null;
+  venue_name: string | null;
+  start_datetime: string;
+  end_datetime: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  min_price: number | null;
+  image_url: string | null;
+  event_type: string | null;
+  genres: string[] | null;
+};
+
 export async function getCrewMemberCount(crewId: string) {
   const { count } = await supabase
     .from('group_members')
@@ -81,9 +99,8 @@ export async function getCrewPinnedEvents(crewId: string, requiredPins: number) 
 
   if (!data) return [];
 
-  return data
-    .map((row: any) => {
-      const event = row;
+  return (data as EventRow[])
+    .map((event) => {
       const mapped: ExternalEvent = {
         id: event.external_id ?? event.id,
         supabaseId: event.id,
@@ -120,5 +137,4 @@ export async function removeCrewEventFromCrew(crewId: string, eventId: string) {
     .eq('crew_id', crewId)
     .eq('event_id', eventId);
 }
-
 

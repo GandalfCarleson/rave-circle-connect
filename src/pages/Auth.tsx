@@ -302,7 +302,7 @@ export default function Auth() {
           return;
         }
         // Wait for session then save preferences and profile details
-        let { data: { session } } = await supabase.auth.getSession();
+        const { data: { session } } = await supabase.auth.getSession();
 
         if (!session?.user) {
           toast({
@@ -834,7 +834,6 @@ export default function Auth() {
     </div>
   );
 }
-
 
 
 

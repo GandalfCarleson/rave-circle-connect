@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Users, Lock, Globe, Send, Calendar, Loader2, Copy, Pencil, Trash2, Reply, Smile } from 'lucide-react';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -73,6 +74,31 @@ interface ReactionSummary {
   reactedByUser?: boolean;
 }
 
+type ProfileRow = {
+  user_id: string;
+  name: string | null;
+  avatar_url: string | null;
+};
+
+type EventRow = {
+  id: string;
+  name: string;
+  venue_name: string | null;
+  city: string | null;
+  start_datetime: string;
+  end_datetime: string | null;
+  image_url: string | null;
+  event_type: string | null;
+};
+
+type GroupMemberRow = {
+  id: string;
+  user_id: string;
+  role: string;
+  name: string | null;
+  avatar_url: string | null;
+};
+
 const DEFAULT_RETRACT_TTL_SECONDS = 600;
 const MIN_RETRACT_TTL_SECONDS = 30;
 const MAX_RETRACT_TTL_SECONDS = 3600;
@@ -124,7 +150,7 @@ export default function GroupDetail() {
   const [customEmoji, setCustomEmoji] = useState('');
   const [reactionBar, setReactionBar] = useState<{ messageId: string; x: number; y: number } | null>(null);
   const reactionBarRef = useRef<HTMLDivElement | null>(null);
-  const typingChannelRef = useRef<any>(null);
+  const typingChannelRef = useRef<RealtimeChannel | null>(null);
   const typingTimeoutRef = useRef<number | null>(null);
   const [typingUsers, setTypingUsers] = useState<Record<string, number>>({});
   const [crewPinCounts, setCrewPinCounts] = useState<Record<string, number>>({});
@@ -153,305 +179,10 @@ export default function GroupDetail() {
   const longPressTriggeredRef = useRef(false);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const memberCount = Math.max(1, members.length);
+  const requiredPins = Math.max(1, Math.ceil(memberCount * 0.6));
 
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
-
-  useEffect(() => {
-    if (user && groupId) {
-      fetchGroup();
-      fetchMessages();
-      fetchMembers();
-      fetchCrewPinnedEvents();
-
-      // Set up realtime subscription
-      const channel = supabase
-        .channel(`group-${groupId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'messages',
-            filter: `group_id=eq.${groupId}`,
-          },
-          async (payload) => {
-            if (payload.eventType === 'DELETE') {
-              const oldMsg = payload.old as { id?: string } | null;
-              if (!oldMsg?.id) return;
-              setMessages(prev => prev.filter((message) => message.id !== oldMsg.id));
-              setReactionsByMessage(prev => {
-                const next = { ...prev };
-                delete next[oldMsg.id];
-                return next;
-              });
-              return;
-            }
-
-            const nextMsg = payload.new as any;
-            if (!nextMsg) return;
-            const profile = nextMsg.user_id
-              ? (await supabase
-                  .from('profiles')
-                  .select('name, avatar_url')
-                  .eq('user_id', nextMsg.user_id)
-                  .single()).data
-              : null;
-
-            let attachedEvent = undefined;
-            if (nextMsg.attached_event_id) {
-              const { data: eventData } = await supabase
-                .from('events')
-                .select('id, name, venue_name, city, start_datetime, end_datetime, image_url, event_type')
-                .eq('id', nextMsg.attached_event_id)
-                .single();
-              if (eventData) {
-                attachedEvent = eventData;
-              }
-            }
-
-            setMessages(prev => {
-              const existingIndex = prev.findIndex((message) => message.id === nextMsg.id);
-              const mapped = {
-                ...nextMsg,
-                sender_name: profile?.name || 'Unknown',
-                sender_avatar: profile?.avatar_url,
-                attached_event: attachedEvent,
-              };
-              if (existingIndex === -1) {
-                return [...prev, mapped];
-              }
-              const next = [...prev];
-              next[existingIndex] = mapped;
-              return next;
-            });
-          }
-        )
-        .subscribe();
-
-      const presenceChannel = supabase
-        .channel(`presence-group-${groupId}`, {
-          config: {
-            presence: { key: user.id },
-          },
-        })
-        .on('presence', { event: 'sync' }, () => {
-          const state = presenceChannel.presenceState();
-          const online = new Set<string>();
-          Object.keys(state).forEach((key) => online.add(key));
-          setOnlineUsers(online);
-        })
-        .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') {
-            await presenceChannel.track({ online_at: new Date().toISOString() });
-          }
-        });
-
-      let activeIntervalId: number | null = null;
-      const activeChannel = supabase
-        .channel(`presence-active-${groupId}`, {
-          config: {
-            presence: { key: `${user.id}-active` },
-          },
-        })
-        .on('presence', { event: 'sync' }, () => {
-          const state = activeChannel.presenceState();
-          const active = new Set<string>();
-          Object.keys(state).forEach((key) => {
-            const userId = key.replace('-active', '');
-            if (userId) active.add(userId);
-          });
-          setActiveUsers(active);
-        })
-        .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') {
-            await activeChannel.track({ active_at: new Date().toISOString() });
-            activeIntervalId = window.setInterval(() => {
-              activeChannel.track({ active_at: new Date().toISOString() });
-            }, 20000);
-          }
-        });
-
-      const pinChannel = supabase
-        .channel(`crew-pins-${groupId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'crew_event_pins',
-            filter: `crew_id=eq.${groupId}`,
-          },
-          () => {
-            refreshCrewPins(messageEventIdsRef.current);
-          }
-        )
-        .subscribe();
-
-      const membersChannel = supabase
-        .channel(`group-members-${groupId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'group_members',
-            filter: `group_id=eq.${groupId}`,
-          },
-          () => {
-            fetchMembers();
-          }
-        )
-        .subscribe();
-
-      const typingChannel = supabase
-        .channel(`typing-${groupId}`, {
-          config: { broadcast: { self: false } },
-        })
-        .on('broadcast', { event: 'typing' }, ({ payload }) => {
-          const userId = payload?.user_id as string | undefined;
-          const isTyping = payload?.typing as boolean | undefined;
-          if (!userId) return;
-          setTypingUsers((prev) => {
-            const next = { ...prev };
-            if (isTyping) {
-              next[userId] = Date.now() + 2500;
-            } else {
-              delete next[userId];
-            }
-            return next;
-          });
-        })
-        .subscribe();
-      typingChannelRef.current = typingChannel;
-
-      const readsChannel = supabase
-        .channel(`group-reads-${groupId}`)
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'group_reads',
-            filter: `group_id=eq.${groupId}`,
-          },
-          () => {
-            fetchReadReceipts();
-          }
-        )
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-        supabase.removeChannel(presenceChannel);
-        supabase.removeChannel(activeChannel);
-        supabase.removeChannel(pinChannel);
-        supabase.removeChannel(membersChannel);
-        supabase.removeChannel(typingChannel);
-        supabase.removeChannel(readsChannel);
-        if (activeIntervalId) window.clearInterval(activeIntervalId);
-      };
-    }
-  }, [user, groupId]);
-
-  useEffect(() => {
-    if (!user || !groupId) return;
-    runRetractedCleanup();
-    const intervalId = window.setInterval(runRetractedCleanup, 60000);
-    return () => window.clearInterval(intervalId);
-  }, [user, groupId]);
-
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setTypingUsers((prev) => {
-        const next: Record<string, number> = {};
-        Object.keys(prev).forEach((userId) => {
-          if (prev[userId] > Date.now()) {
-            next[userId] = prev[userId];
-          }
-        });
-        return next;
-      });
-    }, 1000);
-    return () => window.clearInterval(intervalId);
-  }, []);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  useEffect(() => {
-    const eventIds = messages
-      .map(message => message.attached_event_id)
-      .filter((eventId): eventId is string => Boolean(eventId));
-    messageEventIdsRef.current = eventIds;
-    if (user && groupId) {
-      refreshCrewPins(eventIds);
-    }
-  }, [messages, user, groupId]);
-
-  useEffect(() => {
-    if (messages.length > 0) {
-      fetchReactions();
-      updateReadReceipt();
-      fetchReadReceipts();
-    } else {
-      setReactionsByMessage({});
-    }
-  }, [messages]);
-
-  // Keep the scroll padding in sync with the fixed composer height.
-  useEffect(() => {
-    const root = groupChatRef.current;
-    const composer = composerRef.current;
-    if (!root || !composer) return;
-
-    const updateHeight = () => {
-      root.style.setProperty('--composer-height', `${composer.offsetHeight}px`);
-    };
-
-    updateHeight();
-    const observer = new ResizeObserver(() => updateHeight());
-    observer.observe(composer);
-    window.addEventListener('resize', updateHeight);
-
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', updateHeight);
-    };
-  }, []);
-
-
-  useEffect(() => {
-    if (!groupId || messages.length === 0) return;
-    const messageIds = messages.map((message) => message.id);
-    if (messageIds.length === 0) return;
-    const filter = `message_id=in.(${messageIds.join(',')})`;
-    const reactionsChannel = supabase
-      .channel(`message-reactions-${groupId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'message_reactions',
-          filter,
-        },
-        () => {
-          fetchReactions();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(reactionsChannel);
-    };
-  }, [groupId, messages]);
-
-  const fetchGroup = async () => {
+  const fetchGroup = useCallback(async () => {
     if (!groupId) return;
     const { data } = await supabase.rpc('get_group_for_member', { p_group_id: groupId });
     if (data && data.length > 0) {
@@ -460,9 +191,9 @@ export default function GroupDetail() {
       return;
     }
     setLoading(false);
-  };
+  }, [groupId]);
 
-  const fetchMessages = async () => {
+  const fetchMessages = useCallback(async () => {
     if (!groupId) return;
     const { data: messageRows, error } = await supabase
       .from('messages')
@@ -495,9 +226,9 @@ export default function GroupDetail() {
     ]);
 
     const profileMap = new Map(
-      (profiles || []).map((profile: any) => [profile.user_id, profile])
+      ((profiles || []) as ProfileRow[]).map((profile) => [profile.user_id, profile])
     );
-    const eventMap = new Map((events || []).map((event: any) => [event.id, event]));
+    const eventMap = new Map(((events || []) as EventRow[]).map((event) => [event.id, event]));
 
     setMessages(
       messageRows.map((msg) => {
@@ -513,13 +244,13 @@ export default function GroupDetail() {
         };
       })
     );
-  };
+  }, [groupId]);
 
-  const runRetractedCleanup = async () => {
+  const runRetractedCleanup = useCallback(async () => {
     await supabase.rpc('cleanup_retracted_messages', { p_limit: 100 });
-  };
+  }, []);
 
-  const fetchReactions = async () => {
+  const fetchReactions = useCallback(async () => {
     if (!user || messages.length === 0) return;
     const messageIds = messages.map(message => message.id);
     const { data } = await supabase
@@ -551,7 +282,7 @@ export default function GroupDetail() {
       mapped[messageId] = Object.values(grouped[messageId]);
     });
     setReactionsByMessage(mapped);
-  };
+  }, [messages, user]);
 
   const toggleReaction = async (messageId: string, emoji: string) => {
     if (!user) return;
@@ -843,19 +574,20 @@ export default function GroupDetail() {
     closeMessageMenus();
   };
 
-  const fetchMembers = async () => {
+  const fetchMembers = useCallback(async () => {
     if (!groupId) return;
     const { data } = await supabase.rpc('get_group_members', { p_group_id: groupId });
     if (data) {
-      setMembers(data.map((m: any) => ({
+      const memberRows = (data || []) as GroupMemberRow[];
+      setMembers(memberRows.map((m) => ({
         ...m,
         name: m.name,
         avatar_url: m.avatar_url,
       })));
     }
-  };
+  }, [groupId]);
 
-  const fetchReadReceipts = async () => {
+  const fetchReadReceipts = useCallback(async () => {
     if (!groupId) return;
     const { data } = await supabase
       .from('group_reads')
@@ -869,9 +601,9 @@ export default function GroupDetail() {
       }
     });
     setGroupReads(next);
-  };
+  }, [groupId]);
 
-  const updateReadReceipt = async () => {
+  const updateReadReceipt = useCallback(async () => {
     if (!user || !groupId || messages.length === 0) return;
     const lastMessage = messages[messages.length - 1];
     if (!lastMessage) return;
@@ -883,9 +615,9 @@ export default function GroupDetail() {
         last_read_message_id: lastMessage.id,
         last_read_at: new Date().toISOString(),
       });
-  };
+  }, [groupId, messages, user]);
 
-  const refreshCrewPins = async (eventIds: string[]) => {
+  const refreshCrewPins = useCallback(async (eventIds: string[]) => {
     if (!user || !groupId) return;
     if (eventIds.length === 0) {
       setCrewPinCounts({});
@@ -898,13 +630,318 @@ export default function GroupDetail() {
     ]);
     setCrewPinCounts(counts);
     setCrewPinnedByUser(pinnedByUser);
-  };
+  }, [groupId, user]);
 
-  const fetchCrewPinnedEvents = async (pinsRequired: number = requiredPins) => {
+  const fetchCrewPinnedEvents = useCallback(async (pinsRequired: number = requiredPins) => {
     if (!groupId) return;
     const events = await getCrewPinnedEvents(groupId, pinsRequired);
     setCrewBoardEvents(events);
-  };
+  }, [groupId, requiredPins]);
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      navigate('/auth');
+    }
+  }, [authLoading, navigate, user]);
+
+  useEffect(() => {
+    if (user && groupId) {
+      fetchGroup();
+      fetchMessages();
+      fetchMembers();
+      fetchCrewPinnedEvents();
+
+      // Set up realtime subscription
+      const channel = supabase
+        .channel(`group-${groupId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'messages',
+            filter: `group_id=eq.${groupId}`,
+          },
+          async (payload) => {
+            if (payload.eventType === 'DELETE') {
+              const oldMsg = payload.old as { id?: string } | null;
+              if (!oldMsg?.id) return;
+              setMessages(prev => prev.filter((message) => message.id !== oldMsg.id));
+              setReactionsByMessage(prev => {
+                const next = { ...prev };
+                delete next[oldMsg.id];
+                return next;
+              });
+              return;
+            }
+
+            const nextMsg = payload.new as Message;
+            if (!nextMsg) return;
+            const profile = nextMsg.user_id
+              ? (await supabase
+                  .from('profiles')
+                  .select('name, avatar_url')
+                  .eq('user_id', nextMsg.user_id)
+                  .single()).data
+              : null;
+
+            let attachedEvent = undefined;
+            if (nextMsg.attached_event_id) {
+              const { data: eventData } = await supabase
+                .from('events')
+                .select('id, name, venue_name, city, start_datetime, end_datetime, image_url, event_type')
+                .eq('id', nextMsg.attached_event_id)
+                .single();
+              if (eventData) {
+                attachedEvent = eventData;
+              }
+            }
+
+            setMessages(prev => {
+              const existingIndex = prev.findIndex((message) => message.id === nextMsg.id);
+              const mapped = {
+                ...nextMsg,
+                sender_name: profile?.name || 'Unknown',
+                sender_avatar: profile?.avatar_url,
+                attached_event: attachedEvent,
+              };
+              if (existingIndex === -1) {
+                return [...prev, mapped];
+              }
+              const next = [...prev];
+              next[existingIndex] = mapped;
+              return next;
+            });
+          }
+        )
+        .subscribe();
+
+      const presenceChannel = supabase
+        .channel(`presence-group-${groupId}`, {
+          config: {
+            presence: { key: user.id },
+          },
+        })
+        .on('presence', { event: 'sync' }, () => {
+          const state = presenceChannel.presenceState();
+          const online = new Set<string>();
+          Object.keys(state).forEach((key) => online.add(key));
+          setOnlineUsers(online);
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            await presenceChannel.track({ online_at: new Date().toISOString() });
+          }
+        });
+
+      let activeIntervalId: number | null = null;
+      const activeChannel = supabase
+        .channel(`presence-active-${groupId}`, {
+          config: {
+            presence: { key: `${user.id}-active` },
+          },
+        })
+        .on('presence', { event: 'sync' }, () => {
+          const state = activeChannel.presenceState();
+          const active = new Set<string>();
+          Object.keys(state).forEach((key) => {
+            const userId = key.replace('-active', '');
+            if (userId) active.add(userId);
+          });
+          setActiveUsers(active);
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            await activeChannel.track({ active_at: new Date().toISOString() });
+            activeIntervalId = window.setInterval(() => {
+              activeChannel.track({ active_at: new Date().toISOString() });
+            }, 20000);
+          }
+        });
+
+      const pinChannel = supabase
+        .channel(`crew-pins-${groupId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'crew_event_pins',
+            filter: `crew_id=eq.${groupId}`,
+          },
+          () => {
+            refreshCrewPins(messageEventIdsRef.current);
+          }
+        )
+        .subscribe();
+
+      const membersChannel = supabase
+        .channel(`group-members-${groupId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'group_members',
+            filter: `group_id=eq.${groupId}`,
+          },
+          () => {
+            fetchMembers();
+          }
+        )
+        .subscribe();
+
+      const typingChannel = supabase
+        .channel(`typing-${groupId}`, {
+          config: { broadcast: { self: false } },
+        })
+        .on('broadcast', { event: 'typing' }, ({ payload }) => {
+          const userId = payload?.user_id as string | undefined;
+          const isTyping = payload?.typing as boolean | undefined;
+          if (!userId) return;
+          setTypingUsers((prev) => {
+            const next = { ...prev };
+            if (isTyping) {
+              next[userId] = Date.now() + 2500;
+            } else {
+              delete next[userId];
+            }
+            return next;
+          });
+        })
+        .subscribe();
+      typingChannelRef.current = typingChannel;
+
+      const readsChannel = supabase
+        .channel(`group-reads-${groupId}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'group_reads',
+            filter: `group_id=eq.${groupId}`,
+          },
+          () => {
+            fetchReadReceipts();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+        supabase.removeChannel(presenceChannel);
+        supabase.removeChannel(activeChannel);
+        supabase.removeChannel(pinChannel);
+        supabase.removeChannel(membersChannel);
+        supabase.removeChannel(typingChannel);
+        supabase.removeChannel(readsChannel);
+        if (activeIntervalId) window.clearInterval(activeIntervalId);
+      };
+    }
+  }, [
+    fetchCrewPinnedEvents,
+    fetchGroup,
+    fetchMembers,
+    fetchMessages,
+    fetchReadReceipts,
+    groupId,
+    refreshCrewPins,
+    user,
+  ]);
+
+  useEffect(() => {
+    if (!user || !groupId) return;
+    runRetractedCleanup();
+    const intervalId = window.setInterval(runRetractedCleanup, 60000);
+    return () => window.clearInterval(intervalId);
+  }, [groupId, runRetractedCleanup, user]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setTypingUsers((prev) => {
+        const next: Record<string, number> = {};
+        Object.keys(prev).forEach((userId) => {
+          if (prev[userId] > Date.now()) {
+            next[userId] = prev[userId];
+          }
+        });
+        return next;
+      });
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  useEffect(() => {
+    const eventIds = messages
+      .map(message => message.attached_event_id)
+      .filter((eventId): eventId is string => Boolean(eventId));
+    messageEventIdsRef.current = eventIds;
+    if (user && groupId) {
+      refreshCrewPins(eventIds);
+    }
+  }, [groupId, messages, refreshCrewPins, user]);
+
+  useEffect(() => {
+    if (messages.length > 0) {
+      fetchReactions();
+      updateReadReceipt();
+      fetchReadReceipts();
+    } else {
+      setReactionsByMessage({});
+    }
+  }, [fetchReadReceipts, fetchReactions, messages, updateReadReceipt]);
+
+  // Keep the scroll padding in sync with the fixed composer height.
+  useEffect(() => {
+    const root = groupChatRef.current;
+    const composer = composerRef.current;
+    if (!root || !composer) return;
+
+    const updateHeight = () => {
+      root.style.setProperty('--composer-height', `${composer.offsetHeight}px`);
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(() => updateHeight());
+    observer.observe(composer);
+    window.addEventListener('resize', updateHeight);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateHeight);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!groupId || messages.length === 0) return;
+    const messageIds = messages.map((message) => message.id);
+    if (messageIds.length === 0) return;
+    const filter = `message_id=in.(${messageIds.join(',')})`;
+    const reactionsChannel = supabase
+      .channel(`message-reactions-${groupId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'message_reactions',
+          filter,
+        },
+        () => {
+          fetchReactions();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(reactionsChannel);
+    };
+  }, [fetchReactions, groupId, messages]);
 
   const toggleCrewPin = async (eventId: string) => {
     if (!user || !groupId) return;
@@ -1001,8 +1038,6 @@ export default function GroupDetail() {
     fetchMembers();
   };
 
-  const memberCount = Math.max(1, members.length);
-  const requiredPins = Math.max(1, Math.ceil(memberCount * 0.6));
   const messageMenuItems = actionMessage ? getMessageMenuItems(actionMessage) : [];
   const replyMessage = replyToMessageId
     ? messages.find((message) => message.id === replyToMessageId)

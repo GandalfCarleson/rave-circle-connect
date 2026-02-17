@@ -4,7 +4,25 @@ import { ensureSupabaseEvents, getMockEventsById, type ExternalEvent } from '@/s
 const cacheByExternalId = new Map<string, ExternalEvent>();
 const cacheBySupabaseId = new Map<string, ExternalEvent>();
 
-const toExternalEvent = (row: any): ExternalEvent => ({
+type EventRow = {
+  id: string;
+  external_id: string | null;
+  source: string | null;
+  name: string;
+  description: string | null;
+  city: string | null;
+  venue_name: string | null;
+  start_datetime: string;
+  end_datetime: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  min_price: number | null;
+  image_url: string | null;
+  event_type: string | null;
+  genres: string[] | null;
+};
+
+const toExternalEvent = (row: EventRow): ExternalEvent => ({
   id: row.external_id ?? row.id,
   supabaseId: row.id,
   externalId: row.external_id ?? row.id,

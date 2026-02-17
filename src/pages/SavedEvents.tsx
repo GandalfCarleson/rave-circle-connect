@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Calendar } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -21,13 +21,7 @@ export default function SavedEvents() {
     }
   }, [user, authLoading, navigate]);
 
-  useEffect(() => {
-    if (user) {
-      fetchSavedEvents();
-    }
-  }, [user]);
-
-  const fetchSavedEvents = async () => {
+  const fetchSavedEvents = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase
       .from('user_pinned_events')
@@ -45,7 +39,13 @@ export default function SavedEvents() {
     const resolved = await resolveEventsBySupabaseIds(eventIds);
     setEvents(resolved);
     setLoading(false);
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      fetchSavedEvents();
+    }
+  }, [fetchSavedEvents, user]);
 
   if (authLoading || loading) {
     return (

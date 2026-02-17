@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { LogOut, MapPin, Music, Settings, Pin, Loader2 } from 'lucide-react';
@@ -53,30 +53,7 @@ export default function Profile() {
     }
   }, [user, authLoading, navigate]);
 
-  useEffect(() => {
-    if (isDevMode) {
-      setProfile({
-        name: devProfile?.name || '',
-        username: devProfile?.username || '',
-        avatar_url: devProfile?.avatar_url ?? null,
-        bio: devProfile?.bio || '',
-        city: devProfile?.city || '',
-        radius_km: devProfile?.radius_km ?? 50,
-        is_discoverable: devProfile?.is_discoverable ?? true,
-        show_events_on_profile: devProfile?.show_events_on_profile ?? true,
-      });
-      setSelectedGenres(devProfile?.genres || []);
-      setLoading(false);
-      return;
-    }
-
-    if (user) {
-      fetchProfile();
-      fetchGenres();
-    }
-  }, [user, isDevMode, devProfile]);
-
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase
       .from('profiles')
@@ -99,9 +76,9 @@ export default function Profile() {
       });
     }
     setLoading(false);
-  };
+  }, [user]);
 
-  const fetchGenres = async () => {
+  const fetchGenres = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase
       .from('user_preferences')
@@ -111,7 +88,30 @@ export default function Profile() {
     if (data) {
       setSelectedGenres(data.map(p => p.genre));
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (isDevMode) {
+      setProfile({
+        name: devProfile?.name || '',
+        username: devProfile?.username || '',
+        avatar_url: devProfile?.avatar_url ?? null,
+        bio: devProfile?.bio || '',
+        city: devProfile?.city || '',
+        radius_km: devProfile?.radius_km ?? 50,
+        is_discoverable: devProfile?.is_discoverable ?? true,
+        show_events_on_profile: devProfile?.show_events_on_profile ?? true,
+      });
+      setSelectedGenres(devProfile?.genres || []);
+      setLoading(false);
+      return;
+    }
+
+    if (user) {
+      fetchProfile();
+      fetchGenres();
+    }
+  }, [devProfile, fetchGenres, fetchProfile, isDevMode, user]);
 
   const updateProfile = async (updates: Partial<ProfileData>) => {
     if (!user) return;
@@ -451,7 +451,6 @@ export default function Profile() {
     </div>
   );
 }
-
 
 
 

@@ -85,27 +85,6 @@ export default function Feed() {
     }
   }, [user, authLoading, navigate]);
 
-  useEffect(() => {
-    if (user) {
-      fetchProfile();
-      fetchPreferences();
-      fetchUserGroups();
-      requestLocation();
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (user) {
-      fetchEvents();
-    }
-  }, [user, profile.city, profile.radius_km, profile.latitude, profile.longitude, selectedDate, preferredGenres]);
-
-  useEffect(() => {
-    if (user) {
-      fetchEventActions();
-    }
-  }, [user, matchedEvents, suggestedEvents]);
-
   const requestLocation = useCallback(async () => {
     if (!user || !navigator.geolocation) {
       setLocationStatus('denied');
@@ -131,7 +110,7 @@ export default function Feed() {
     );
   }, [user]);
 
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase
       .from('profiles')
@@ -145,9 +124,9 @@ export default function Feed() {
         : RADIUS_OPTIONS[0].value;
       setProfile({ ...data, radius_km: radiusValue });
     }
-  };
+  }, [user]);
 
-  const fetchPreferences = async () => {
+  const fetchPreferences = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase
       .from('user_preferences')
@@ -157,9 +136,9 @@ export default function Feed() {
     if (data) {
       setPreferredGenres(data.map(pref => pref.genre));
     }
-  };
+  }, [user]);
 
-  const fetchEvents = async () => {
+  const fetchEvents = useCallback(async () => {
     setLoading(true);
     setExpandingSearch(true);
     const dateFilter = selectedDate === 'this-week'
@@ -196,9 +175,9 @@ export default function Feed() {
     setSuggestedEvents(hydratedSuggested);
     setLoading(false);
     setExpandingSearch(false);
-  };
+  }, [preferredGenres, profile.city, profile.latitude, profile.longitude, profile.radius_km, selectedDate]);
 
-  const fetchEventActions = async () => {
+  const fetchEventActions = useCallback(async () => {
     if (!user) return;
     const eventIds = [...matchedEvents, ...suggestedEvents]
       .map(event => event.supabaseId)
@@ -231,7 +210,7 @@ export default function Feed() {
 
     const pinnedSet = new Set((pins || []).map(pin => pin.event_id));
     setPinnedEvents(pinnedSet);
-  };
+  }, [matchedEvents, suggestedEvents, user]);
 
   const ensureEventReady = async (event: ExternalEvent) => {
     if (event.supabaseId) return event;
@@ -247,7 +226,7 @@ export default function Feed() {
     return hydrated;
   };
 
-  const fetchUserGroups = async () => {
+  const fetchUserGroups = useCallback(async () => {
     if (!user) return;
     
     const { data: memberGroups } = await supabase
@@ -266,7 +245,28 @@ export default function Feed() {
         setUserGroups(groups);
       }
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (user) {
+      fetchProfile();
+      fetchPreferences();
+      fetchUserGroups();
+      requestLocation();
+    }
+  }, [fetchPreferences, fetchProfile, fetchUserGroups, requestLocation, user]);
+
+  useEffect(() => {
+    if (user) {
+      fetchEvents();
+    }
+  }, [fetchEvents, user]);
+
+  useEffect(() => {
+    if (user) {
+      fetchEventActions();
+    }
+  }, [fetchEventActions, user]);
 
   const updateRadius = async (radius: number) => {
     if (!user) return;
@@ -538,10 +538,11 @@ export default function Feed() {
       setShareModalOpen(false);
       setSelectedEventToShare(null);
       setSelectedGroupId(null);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unable to share event.';
       toast({
         title: 'Failed to share',
-        description: error.message,
+        description: message,
         variant: 'destructive',
       });
     }

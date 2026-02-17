@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, memo } from 'react';
+import { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Compass, Users, Calendar, TrendingUp } from 'lucide-react';
@@ -61,23 +61,44 @@ export default function Discover() {
     }
   }, [user, authLoading, navigate]);
 
-  useEffect(() => {
-    if (user) {
-      fetchData();
-    }
-  }, [user]);
+  const fetchTrendingEvents = useCallback(async () => {
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data } = await supabase
+      .from('crew_event_pins')
+      .select('event_id')
+      .gte('created_at', since);
 
-  useEffect(() => {
-    if (user) {
-      fetchEventActions();
+    const counts: Record<string, number> = {};
+    (data || []).forEach((row) => {
+      counts[row.event_id] = (counts[row.event_id] || 0) + 1;
+    });
+    const eventIds = Object.keys(counts);
+    if (eventIds.length === 0) {
+      setTrendingEvents([]);
+      setLoadingTrending(false);
+      return;
     }
-  }, [user, recommendedEvents]);
 
-  const fetchData = async () => {
+    const resolved = await resolveEventsBySupabaseIds(eventIds);
+    const sorted = resolved.sort((a, b) => {
+      const aCount = a.supabaseId ? counts[a.supabaseId] || 0 : 0;
+      const bCount = b.supabaseId ? counts[b.supabaseId] || 0 : 0;
+      return bCount - aCount;
+    });
+    setTrendingEvents(sorted);
+    setLoadingTrending(false);
+  }, []);
+
+  const fetchData = useCallback(async () => {
     setLoading(true);
     setLoadingTrending(true);
-    let currentProfile = profile;
-    let currentPreferences = preferredGenres;
+    let currentProfile: Profile = {
+      city: null,
+      radius_km: RADIUS_OPTIONS[0].value,
+      latitude: null,
+      longitude: null,
+    };
+    let currentPreferences: string[] = [];
     if (user) {
       const { data: profileData } = await supabase
         .from('profiles')
@@ -171,35 +192,7 @@ export default function Discover() {
 
     await fetchTrendingEvents();
     setLoading(false);
-  };
-
-  const fetchTrendingEvents = async () => {
-    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const { data } = await supabase
-      .from('crew_event_pins')
-      .select('event_id')
-      .gte('created_at', since);
-
-    const counts: Record<string, number> = {};
-    (data || []).forEach((row) => {
-      counts[row.event_id] = (counts[row.event_id] || 0) + 1;
-    });
-    const eventIds = Object.keys(counts);
-    if (eventIds.length === 0) {
-      setTrendingEvents([]);
-      setLoadingTrending(false);
-      return;
-    }
-
-    const resolved = await resolveEventsBySupabaseIds(eventIds);
-    const sorted = resolved.sort((a, b) => {
-      const aCount = a.supabaseId ? counts[a.supabaseId] || 0 : 0;
-      const bCount = b.supabaseId ? counts[b.supabaseId] || 0 : 0;
-      return bCount - aCount;
-    });
-    setTrendingEvents(sorted);
-    setLoadingTrending(false);
-  };
+  }, [fetchTrendingEvents, user]);
 
   const sortedEvents = useMemo(() => {
     const hasCoords = profile.latitude != null && profile.longitude != null;
@@ -250,7 +243,7 @@ export default function Discover() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, [loading, isLoadingMore, visibleCount, sortedEvents.length]);
 
-  const fetchEventActions = async () => {
+  const fetchEventActions = useCallback(async () => {
     if (!user) return;
     const eventIds = recommendedEvents
       .map(event => event.supabaseId)
@@ -283,7 +276,19 @@ export default function Discover() {
 
     const pinnedSet = new Set((pins || []).map(pin => pin.event_id));
     setPinnedEvents(pinnedSet);
-  };
+  }, [recommendedEvents, user]);
+
+  useEffect(() => {
+    if (user) {
+      fetchData();
+    }
+  }, [fetchData, user]);
+
+  useEffect(() => {
+    if (user) {
+      fetchEventActions();
+    }
+  }, [fetchEventActions, user]);
 
   const toggleInterested = async (event: ExternalEvent) => {
     if (!user) return;

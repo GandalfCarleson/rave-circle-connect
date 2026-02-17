@@ -80,10 +80,11 @@ export function AvatarUpload({ userId, currentAvatarUrl, onUpload, size = 'lg' }
         title: 'Avatar updated!',
         description: 'Your profile photo has been changed',
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Could not upload avatar';
       toast({
         title: 'Upload failed',
-        description: error.message || 'Could not upload avatar',
+        description: message,
         variant: 'destructive',
       });
     } finally {

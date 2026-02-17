@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { format, isToday } from 'date-fns';
@@ -67,156 +67,7 @@ export default function Groups() {
   const presenceChannelsRef = useRef<Map<string, ReturnType<typeof supabase.channel>>>(new Map());
   const [onlineByGroup, setOnlineByGroup] = useState<Record<string, string[]>>({});
 
-  useEffect(() => {
-    if (!authLoading && !user) {
-      navigate('/auth');
-    }
-  }, [user, authLoading, navigate]);
-
-  useEffect(() => {
-    if (user) {
-      fetchGroups();
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (!user) return;
-    const channel = supabase
-      .channel(`group-members-${user.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'group_members',
-          filter: `user_id=eq.${user.id}`,
-        },
-        () => {
-          fetchGroups();
-        }
-      )
-      .subscribe();
-
-    const handleFocus = () => {
-      fetchGroups();
-    };
-    window.addEventListener('focus', handleFocus);
-
-    return () => {
-      supabase.removeChannel(channel);
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, [user]);
-
-  useEffect(() => {
-    if (!user) return;
-    const activeGroups = new Set(groups.map(group => group.id));
-    typingChannelsRef.current.forEach((channel, groupId) => {
-      if (!activeGroups.has(groupId)) {
-        supabase.removeChannel(channel);
-        typingChannelsRef.current.delete(groupId);
-      }
-    });
-
-    groups.forEach((group) => {
-      if (typingChannelsRef.current.has(group.id)) return;
-      const channel = supabase
-        .channel(`typing-${group.id}`, { config: { broadcast: { self: false } } })
-        .on('broadcast', { event: 'typing' }, ({ payload }) => {
-          const userId = payload?.user_id as string | undefined;
-          const isTyping = payload?.typing as boolean | undefined;
-          if (!userId) return;
-          const userName = (payload?.user_name as string | undefined) || 'Someone';
-          setTypingByGroup((prev) => {
-            const nextGroup = { ...(prev[group.id] || {}) };
-            if (isTyping) {
-              nextGroup[userId] = { expiresAt: Date.now() + 2500, name: userName };
-            } else {
-              delete nextGroup[userId];
-            }
-            return {
-              ...prev,
-              [group.id]: nextGroup,
-            };
-          });
-        })
-        .subscribe();
-      typingChannelsRef.current.set(group.id, channel);
-    });
-
-    return () => {
-      typingChannelsRef.current.forEach((channel) => supabase.removeChannel(channel));
-      typingChannelsRef.current.clear();
-    };
-  }, [user, groups]);
-
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setTypingByGroup((prev) => {
-        const next: Record<string, Record<string, { expiresAt: number; name: string }>> = {};
-        Object.keys(prev).forEach((groupId) => {
-          const entries = Object.entries(prev[groupId] || {}).filter(([, entry]) => entry.expiresAt > Date.now());
-          if (entries.length > 0) {
-            next[groupId] = Object.fromEntries(entries);
-          }
-        });
-        return next;
-      });
-    }, 1000);
-    return () => window.clearInterval(intervalId);
-  }, []);
-
-  useEffect(() => {
-    if (!user) return;
-    const activeGroups = new Set(groups.map(group => group.id));
-    presenceChannelsRef.current.forEach((channel, groupId) => {
-      if (!activeGroups.has(groupId)) {
-        supabase.removeChannel(channel);
-        presenceChannelsRef.current.delete(groupId);
-        setOnlineByGroup((prev) => {
-          const next = { ...prev };
-          delete next[groupId];
-          return next;
-        });
-      }
-    });
-
-    groups.forEach((group) => {
-      if (presenceChannelsRef.current.has(group.id)) return;
-      const channel = supabase
-        .channel(`presence-group-${group.id}`, {
-          config: { presence: { key: user.id } },
-        })
-        .on('presence', { event: 'sync' }, () => {
-          const state = channel.presenceState();
-          const onlineIds = Object.keys(state).filter((id) => id !== user.id);
-          setOnlineByGroup((prev) => ({
-            ...prev,
-            [group.id]: onlineIds,
-          }));
-        })
-        .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') {
-            await channel.track({ online_at: new Date().toISOString() });
-          }
-        });
-      presenceChannelsRef.current.set(group.id, channel);
-    });
-
-    const intervalId = window.setInterval(() => {
-      presenceChannelsRef.current.forEach((channel) => {
-        channel.track({ online_at: new Date().toISOString() });
-      });
-    }, 30000);
-
-    return () => {
-      window.clearInterval(intervalId);
-      presenceChannelsRef.current.forEach((channel) => supabase.removeChannel(channel));
-      presenceChannelsRef.current.clear();
-    };
-  }, [user, groups]);
-
-  const fetchGroups = async () => {
+  const fetchGroups = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     
@@ -270,17 +121,170 @@ export default function Groups() {
       } else {
         setGroups([]);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error fetching groups:', error);
+      const message = error instanceof Error ? error.message : 'Failed to load groups.';
       toast({
         title: 'Error loading groups',
-        description: error.message,
+        description: message,
         variant: 'destructive',
       });
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast, user]);
+
+  useEffect(() => {
+    if (!authLoading && !user) {
+      navigate('/auth');
+    }
+  }, [user, authLoading, navigate]);
+
+  useEffect(() => {
+    if (user) {
+      fetchGroups();
+    }
+  }, [fetchGroups, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel(`group-members-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'group_members',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          fetchGroups();
+        }
+      )
+      .subscribe();
+
+    const handleFocus = () => {
+      fetchGroups();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      supabase.removeChannel(channel);
+      window.removeEventListener('focus', handleFocus);
+    };
+  }, [fetchGroups, user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const typingChannels = typingChannelsRef.current;
+    const activeGroups = new Set(groups.map(group => group.id));
+    typingChannels.forEach((channel, groupId) => {
+      if (!activeGroups.has(groupId)) {
+        supabase.removeChannel(channel);
+        typingChannels.delete(groupId);
+      }
+    });
+
+    groups.forEach((group) => {
+      if (typingChannels.has(group.id)) return;
+      const channel = supabase
+        .channel(`typing-${group.id}`, { config: { broadcast: { self: false } } })
+        .on('broadcast', { event: 'typing' }, ({ payload }) => {
+          const userId = payload?.user_id as string | undefined;
+          const isTyping = payload?.typing as boolean | undefined;
+          if (!userId) return;
+          const userName = (payload?.user_name as string | undefined) || 'Someone';
+          setTypingByGroup((prev) => {
+            const nextGroup = { ...(prev[group.id] || {}) };
+            if (isTyping) {
+              nextGroup[userId] = { expiresAt: Date.now() + 2500, name: userName };
+            } else {
+              delete nextGroup[userId];
+            }
+            return {
+              ...prev,
+              [group.id]: nextGroup,
+            };
+          });
+        })
+        .subscribe();
+      typingChannels.set(group.id, channel);
+    });
+
+    return () => {
+      typingChannels.forEach((channel) => supabase.removeChannel(channel));
+      typingChannels.clear();
+    };
+  }, [user, groups]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setTypingByGroup((prev) => {
+        const next: Record<string, Record<string, { expiresAt: number; name: string }>> = {};
+        Object.keys(prev).forEach((groupId) => {
+          const entries = Object.entries(prev[groupId] || {}).filter(([, entry]) => entry.expiresAt > Date.now());
+          if (entries.length > 0) {
+            next[groupId] = Object.fromEntries(entries);
+          }
+        });
+        return next;
+      });
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const presenceChannels = presenceChannelsRef.current;
+    const activeGroups = new Set(groups.map(group => group.id));
+    presenceChannels.forEach((channel, groupId) => {
+      if (!activeGroups.has(groupId)) {
+        supabase.removeChannel(channel);
+        presenceChannels.delete(groupId);
+        setOnlineByGroup((prev) => {
+          const next = { ...prev };
+          delete next[groupId];
+          return next;
+        });
+      }
+    });
+
+    groups.forEach((group) => {
+      if (presenceChannels.has(group.id)) return;
+      const channel = supabase
+        .channel(`presence-group-${group.id}`, {
+          config: { presence: { key: user.id } },
+        })
+        .on('presence', { event: 'sync' }, () => {
+          const state = channel.presenceState();
+          const onlineIds = Object.keys(state).filter((id) => id !== user.id);
+          setOnlineByGroup((prev) => ({
+            ...prev,
+            [group.id]: onlineIds,
+          }));
+        })
+        .subscribe(async (status) => {
+          if (status === 'SUBSCRIBED') {
+            await channel.track({ online_at: new Date().toISOString() });
+          }
+        });
+      presenceChannels.set(group.id, channel);
+    });
+
+    const intervalId = window.setInterval(() => {
+      presenceChannels.forEach((channel) => {
+        channel.track({ online_at: new Date().toISOString() });
+      });
+    }, 30000);
+
+    return () => {
+      window.clearInterval(intervalId);
+      presenceChannels.forEach((channel) => supabase.removeChannel(channel));
+      presenceChannels.clear();
+    };
+  }, [user, groups]);
+
 
   const formatActivityTime = (timestamp?: string | null) => {
     if (!timestamp) return undefined;
@@ -491,11 +495,12 @@ export default function Groups() {
       setCreateOpen(false);
       setNewGroup({ name: '', description: '', city: '', isPrivate: true });
       fetchGroups();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Full error:', error);
+      const message = error instanceof Error ? error.message : 'Something went wrong. Please try again.';
       toast({
         title: 'Failed to create crew',
-        description: error.message || 'Something went wrong. Please try again.',
+        description: message,
         variant: 'destructive',
       });
     } finally {

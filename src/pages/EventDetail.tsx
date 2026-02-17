@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, MapPin, Calendar, Ticket, Users, Check, Heart, CalendarPlus, Send } from 'lucide-react';
@@ -51,16 +51,7 @@ export default function EventDetail() {
     }
   }, [user, authLoading, navigate]);
 
-  useEffect(() => {
-    if (user && id) {
-      fetchEvent();
-      fetchStatus();
-      fetchGoingCount();
-      fetchUserGroups();
-    }
-  }, [user, id]);
-
-  const fetchEvent = async () => {
+  const fetchEvent = useCallback(async () => {
     if (!id) return;
     const { data } = await supabase
       .from('events')
@@ -70,9 +61,9 @@ export default function EventDetail() {
     
     if (data) setEvent(data);
     setLoading(false);
-  };
+  }, [id]);
 
-  const fetchStatus = async () => {
+  const fetchStatus = useCallback(async () => {
     if (!user || !id) return;
     const { data } = await supabase
       .from('user_event_statuses')
@@ -82,9 +73,9 @@ export default function EventDetail() {
       .single();
     
     if (data) setStatus(data.status as EventStatus);
-  };
+  }, [id, user]);
 
-  const fetchGoingCount = async () => {
+  const fetchGoingCount = useCallback(async () => {
     if (!id) return;
     const { count } = await supabase
       .from('user_event_statuses')
@@ -93,9 +84,9 @@ export default function EventDetail() {
       .eq('status', 'going');
     
     setGoingCount(count || 0);
-  };
+  }, [id]);
 
-  const fetchUserGroups = async () => {
+  const fetchUserGroups = useCallback(async () => {
     if (!user) return;
     const { data: memberGroups } = await supabase
       .from('group_members')
@@ -110,7 +101,16 @@ export default function EventDetail() {
         .in('id', groupIds);
       if (groups) setUserGroups(groups);
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    if (user && id) {
+      fetchEvent();
+      fetchStatus();
+      fetchGoingCount();
+      fetchUserGroups();
+    }
+  }, [fetchEvent, fetchGoingCount, fetchStatus, fetchUserGroups, id, user]);
 
   const shareToGroup = async () => {
     if (!user || !event || !selectedGroupId) return;
