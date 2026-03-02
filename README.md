@@ -104,3 +104,47 @@ Deploy it:
 ```sh
 supabase functions deploy cleanup-retracted-messages --no-verify-jwt
 ```
+
+## Ticketmaster event ingestion
+
+This app proxies the Ticketmaster Discovery API through a Supabase Edge Function.
+
+Set the secret in your Supabase project:
+
+```sh
+supabase secrets set TM_API_KEY=YOUR_TICKETMASTER_CONSUMER_KEY
+```
+
+Deploy the Edge Function:
+
+```sh
+supabase functions deploy ticketmaster-events
+```
+
+Test (Malmö sample):
+
+```
+https://<your-project>.supabase.co/functions/v1/ticketmaster-events?lat=55.6050&lng=13.0038&radiusKm=50&size=20&page=0
+```
+
+## Tickster + aggregated events
+
+Set the Tickster key:
+
+```sh
+supabase secrets set TICKSTER_API_KEY=YOUR_TICKSTER_API_KEY
+```
+
+Deploy Tickster + aggregate functions (public for internal calls):
+
+```sh
+supabase functions deploy tickster-events --no-verify-jwt
+supabase functions deploy ticketmaster-events --no-verify-jwt
+supabase functions deploy events-aggregate
+```
+
+Test aggregate (Malmö sample):
+
+```
+https://<your-project>.supabase.co/functions/v1/events-aggregate?lat=55.6050&lng=13.0038&radiusKm=50&size=20&page=0
+```

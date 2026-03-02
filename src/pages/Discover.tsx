@@ -54,6 +54,17 @@ export default function Discover() {
   const [loading, setLoading] = useState(true);
   const [visibleCount, setVisibleCount] = useState(12);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.debug('[discover] mounted', {
+        authLoading,
+        hasUser: Boolean(user),
+      });
+    }
+  }, [authLoading, user]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -87,6 +98,73 @@ export default function Discover() {
     });
     setTrendingEvents(sorted);
     setLoadingTrending(false);
+  }, []);
+
+  const fetchRecommendedEvents = useCallback(async (pageToLoad: number, profileSnapshot: Profile, preferencesSnapshot: string[], append: boolean) => {
+    if (import.meta.env.DEV) {
+      console.debug('[discover] fetch start', { page: pageToLoad });
+    }
+    try {
+      const {
+        matchedToTaste,
+        suggestedEvents,
+        page: nextPage,
+        totalPages: nextTotalPages,
+      } = await fetchEventsWithFallback({
+        city: profileSnapshot.city || undefined,
+        latitude: profileSnapshot.latitude ?? undefined,
+        longitude: profileSnapshot.longitude ?? undefined,
+        radiusKm: profileSnapshot.radius_km || RADIUS_OPTIONS[0].value,
+        preferredGenres: preferencesSnapshot,
+        page: pageToLoad,
+        size: 20,
+      });
+
+      if (import.meta.env.DEV) {
+        console.debug('[discover] fetched', {
+          matched: matchedToTaste.length,
+          suggested: suggestedEvents.length,
+          page: nextPage,
+          totalPages: nextTotalPages,
+        });
+      }
+
+      const hydrated = await ensureSupabaseEvents([...matchedToTaste, ...suggestedEvents]);
+      const hydratedByExternal = new Map(
+        hydrated.map(event => [event.externalId || event.id, event])
+      );
+      const hydratedMatched = matchedToTaste.map(event =>
+        hydratedByExternal.get(event.externalId || event.id) || event
+      );
+      const hydratedSuggested = suggestedEvents.map(event =>
+        hydratedByExternal.get(event.externalId || event.id) || event
+      );
+
+      if (import.meta.env.DEV) {
+        console.debug('[discover] hydrated', {
+          matched: hydratedMatched.length,
+          suggested: hydratedSuggested.length,
+        });
+      }
+
+      const combined = hydratedMatched.length > 0
+        ? [...hydratedMatched, ...hydratedSuggested]
+        : hydratedSuggested;
+
+      if (append) {
+        setRecommendedEvents(prev => [...prev, ...combined]);
+        setVisibleCount(prev => prev + combined.length);
+      } else {
+        setRecommendedEvents(combined);
+        setVisibleCount(12);
+      }
+      setPage(nextPage);
+      setTotalPages(nextTotalPages);
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.error('[discover] fetch error', error);
+      }
+    }
   }, []);
 
   const fetchData = useCallback(async () => {
@@ -165,34 +243,11 @@ export default function Discover() {
       setOpenGroups(groupsWithCounts);
     }
 
-    const { matchedToTaste, suggestedEvents } = await fetchEventsWithFallback({
-      city: currentProfile.city || undefined,
-      latitude: currentProfile.latitude ?? undefined,
-      longitude: currentProfile.longitude ?? undefined,
-      radiusKm: currentProfile.radius_km || RADIUS_OPTIONS[0].value,
-      preferredGenres: currentPreferences,
-    });
-
-    const hydrated = await ensureSupabaseEvents([...matchedToTaste, ...suggestedEvents]);
-    const hydratedByExternal = new Map(
-      hydrated.map(event => [event.externalId || event.id, event])
-    );
-    const hydratedMatched = matchedToTaste.map(event =>
-      hydratedByExternal.get(event.externalId || event.id) || event
-    );
-    const hydratedSuggested = suggestedEvents.map(event =>
-      hydratedByExternal.get(event.externalId || event.id) || event
-    );
-
-    const combined = hydratedMatched.length > 0
-      ? [...hydratedMatched, ...hydratedSuggested]
-      : hydratedSuggested;
-
-    setRecommendedEvents(combined);
+    await fetchRecommendedEvents(0, currentProfile, currentPreferences, false);
 
     await fetchTrendingEvents();
     setLoading(false);
-  }, [fetchTrendingEvents, user]);
+  }, [fetchRecommendedEvents, fetchTrendingEvents, user]);
 
   const sortedEvents = useMemo(() => {
     const hasCoords = profile.latitude != null && profile.longitude != null;
@@ -229,19 +284,25 @@ export default function Discover() {
   useEffect(() => {
     const handleScroll = () => {
       if (loading || isLoadingMore) return;
-      if (visibleCount >= sortedEvents.length) return;
       const scrollPosition = window.innerHeight + window.scrollY;
       const threshold = document.body.offsetHeight - 300;
-      if (scrollPosition >= threshold) {
-        setIsLoadingMore(true);
+      if (scrollPosition < threshold) return;
+
+      if (visibleCount < sortedEvents.length) {
         setVisibleCount((prev) => Math.min(prev + 12, sortedEvents.length));
-        setTimeout(() => setIsLoadingMore(false), 300);
+        return;
+      }
+
+      if (page + 1 < totalPages) {
+        setIsLoadingMore(true);
+        fetchRecommendedEvents(page + 1, profile, preferredGenres, true)
+          .finally(() => setIsLoadingMore(false));
       }
     };
 
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [loading, isLoadingMore, visibleCount, sortedEvents.length]);
+  }, [fetchRecommendedEvents, isLoadingMore, loading, page, preferredGenres, profile, sortedEvents.length, totalPages, visibleCount]);
 
   const fetchEventActions = useCallback(async () => {
     if (!user) return;

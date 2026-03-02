@@ -1,3 +1,5 @@
+import { fetchAggregatedEvents, type AggregatedEvent } from '@/api/events/aggregate';
+
 type DateFilter = 'this_week' | 'next_week' | 'this_month' | 'this_year';
 
 export type ExternalEvent = {
@@ -34,166 +36,39 @@ const PRIORITY_CITIES = [
   'Prague',
 ] as const;
 
-const MOCK_EVENTS: ExternalEvent[] = [
-  {
-    id: 'mock-berlin-warehouse',
-    name: 'Warehouse Pulse',
-    description: 'Late-night techno marathon in a converted warehouse.',
-    city: 'Berlin',
-    venueName: 'Kraftwerk',
-    startDateTime: '2026-02-07T21:00:00Z',
-    endDateTime: '2026-02-08T06:00:00Z',
-    latitude: 52.511,
-    longitude: 13.419,
-    minPrice: 25,
-    eventType: 'rave',
-    genres: ['Techno', 'Industrial'],
-    imageUrl: 'https://images.unsplash.com/photo-1507874457470-272b3c8d8ee2?q=80&w=1200&auto=format&fit=crop',
-    source: 'mock',
-  },
-  {
-    id: 'mock-cph-harbor',
-    name: 'Harbor Lights',
-    description: 'Melodic house by the water with sunset vibes.',
-    city: 'Copenhagen',
-    venueName: 'Refshaleøen',
-    startDateTime: '2026-02-14T17:00:00Z',
-    endDateTime: '2026-02-14T23:00:00Z',
-    latitude: 55.682,
-    longitude: 12.610,
-    minPrice: 15,
-    eventType: 'festival',
-    genres: ['House', 'Progressive'],
-    imageUrl: 'https://images.unsplash.com/photo-1429962714451-bb934ecdc4ec?q=80&w=1200&auto=format&fit=crop',
-    source: 'mock',
-  },
-  {
-    id: 'mock-malmo-basement',
-    name: 'Basement Signal',
-    description: 'Raw, fast, and heavy techno with local DJs.',
-    city: 'Malmö',
-    venueName: 'Plan B',
-    startDateTime: '2026-02-01T21:30:00Z',
-    endDateTime: '2026-02-02T03:30:00Z',
-    latitude: 55.607,
-    longitude: 13.013,
-    minPrice: 12,
-    eventType: 'club',
-    genres: ['Techno', 'Hardstyle'],
-    imageUrl: 'https://images.unsplash.com/photo-1501386761578-eac5c94b800a?q=80&w=1200&auto=format&fit=crop',
-    source: 'mock',
-  },
-  {
-    id: 'mock-oslo-trance',
-    name: 'Northern Trance',
-    description: 'Uplifting trance with immersive visuals.',
-    city: 'Oslo',
-    venueName: 'Sentrum Scene',
-    startDateTime: '2026-02-21T19:00:00Z',
-    endDateTime: '2026-02-21T23:30:00Z',
-    latitude: 59.913,
-    longitude: 10.746,
-    minPrice: 22,
-    eventType: 'concert',
-    genres: ['Trance', 'EDM'],
-    imageUrl: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?q=80&w=1200&auto=format&fit=crop',
-    source: 'mock',
-  },
-  {
-    id: 'mock-amsterdam-dnb',
-    name: 'Bassline Syndicate',
-    description: 'Drum & Bass night with guest MCs.',
-    city: 'Amsterdam',
-    venueName: 'Melkweg',
-    startDateTime: '2026-02-28T20:00:00Z',
-    endDateTime: '2026-03-01T02:00:00Z',
-    latitude: 52.364,
-    longitude: 4.883,
-    minPrice: 18,
-    eventType: 'club',
-    genres: ['Drum & Bass'],
-    imageUrl: 'https://images.unsplash.com/photo-1461783436728-0a921771469b?q=80&w=1200&auto=format&fit=crop',
-    source: 'mock',
-  },
-  {
-    id: 'mock-stockholm-festival',
-    name: 'Northern Skies Festival',
-    description: 'Open-air festival with techno and house across two stages.',
-    city: 'Stockholm',
-    venueName: 'Gärdet',
-    startDateTime: '2026-03-06T12:00:00Z',
-    endDateTime: '2026-03-08T22:00:00Z',
-    latitude: 59.337,
-    longitude: 18.090,
-    minPrice: 65,
-    eventType: 'festival',
-    genres: ['Techno', 'House'],
-    imageUrl: 'https://images.unsplash.com/photo-1459749411175-04bf5292ceea?q=80&w=1200&auto=format&fit=crop',
-    source: 'mock',
-  },
-  {
-    id: 'mock-gothenburg-rave',
-    name: 'Terminal 9',
-    description: 'Underground rave with hard techno and industrial sets.',
-    city: 'Gothenburg',
-    venueName: 'Ringön',
-    startDateTime: '2026-03-13T22:00:00Z',
-    endDateTime: '2026-03-14T05:00:00Z',
-    latitude: 57.719,
-    longitude: 11.973,
-    minPrice: 18,
-    eventType: 'rave',
-    genres: ['Techno', 'Industrial'],
-    imageUrl: 'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=1200&auto=format&fit=crop',
-    source: 'mock',
-  },
-  {
-    id: 'mock-prague-club',
-    name: 'Submerge',
-    description: 'Deep house and minimal with resident DJs.',
-    city: 'Prague',
-    venueName: 'Cross Club',
-    startDateTime: '2026-03-20T20:30:00Z',
-    endDateTime: '2026-03-21T03:00:00Z',
-    latitude: 50.105,
-    longitude: 14.451,
-    minPrice: 14,
-    eventType: 'club',
-    genres: ['House', 'Minimal'],
-    imageUrl: 'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?q=80&w=1200&auto=format&fit=crop',
-    source: 'mock',
-  },
-  {
-    id: 'mock-helsinki-concert',
-    name: 'Aurora Pulse',
-    description: 'Live electronic concert with immersive visuals.',
-    city: 'Helsinki',
-    venueName: 'Kaapelitehdas',
-    startDateTime: '2026-04-03T19:00:00Z',
-    endDateTime: '2026-04-03T22:00:00Z',
-    latitude: 60.165,
-    longitude: 24.922,
-    minPrice: 28,
-    eventType: 'concert',
-    genres: ['Ambient', 'EDM'],
-    imageUrl: 'https://images.unsplash.com/photo-1429962714451-bb934ecdc4ec?q=80&w=1200&auto=format&fit=crop',
-    source: 'mock',
-  },
-];
+const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
+  Stockholm: { lat: 59.3293, lng: 18.0686 },
+  Gothenburg: { lat: 57.7089, lng: 11.9746 },
+  Malmö: { lat: 55.605, lng: 13.0038 },
+  Copenhagen: { lat: 55.6761, lng: 12.5683 },
+  Oslo: { lat: 59.9139, lng: 10.7522 },
+  Helsinki: { lat: 60.1699, lng: 24.9384 },
+  Berlin: { lat: 52.52, lng: 13.405 },
+  Munich: { lat: 48.1351, lng: 11.582 },
+  Frankfurt: { lat: 50.1109, lng: 8.6821 },
+  Amsterdam: { lat: 52.3676, lng: 4.9041 },
+  Rotterdam: { lat: 51.9244, lng: 4.4777 },
+  Prague: { lat: 50.0755, lng: 14.4378 },
+};
 
-const EXTERNAL_EVENTS_API_URL = import.meta.env.VITE_EXTERNAL_EVENTS_API_URL as string | undefined;
-const EXTERNAL_EVENTS_API_KEY = import.meta.env.VITE_EXTERNAL_EVENTS_API_KEY as string | undefined;
+const resolveCoords = (city?: string, latitude?: number, longitude?: number) => {
+  if (latitude != null && longitude != null) {
+    return { lat: latitude, lng: longitude };
+  }
+  if (city && CITY_COORDS[city]) {
+    return CITY_COORDS[city];
+  }
+  const fallbackCity = PRIORITY_CITIES[0];
+  return CITY_COORDS[fallbackCity] ?? null;
+};
 
 const ensureExternalId = (event: ExternalEvent) => ({
   ...event,
   externalId: event.externalId || event.id,
 });
 
-export function getMockEventsById(ids: string[]) {
-  const lookup = new Set(ids);
-  return MOCK_EVENTS
-    .filter(event => lookup.has(event.id))
-    .map(ensureExternalId);
+export function getMockEventsById(_ids: string[]) {
+  return [] as ExternalEvent[];
 }
 
 const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -201,6 +76,8 @@ const addDays = (date: Date, days: number) => new Date(date.getTime() + days * 2
 const endOfDay = (date: Date) => new Date(startOfDay(date).getTime() + 24 * 60 * 60 * 1000 - 1);
 const endOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
 const endOfYear = (date: Date) => new Date(date.getFullYear(), 11, 31, 23, 59, 59, 999);
+
+const formatDateTime = (date: Date) => date.toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 function getDateRange(filter?: DateFilter) {
   if (!filter) return null;
@@ -229,43 +106,6 @@ function matchesDateFilter(event: ExternalEvent, filter?: DateFilter) {
   return start >= range.start && start <= range.end;
 }
 
-function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-function filterByLocation(events: ExternalEvent[], options: {
-  city?: string;
-  latitude?: number;
-  longitude?: number;
-  radiusKm: number;
-}) {
-  return events.filter(event => {
-    const hasCoords = options.latitude != null && options.longitude != null;
-    if (!hasCoords && options.city && event.city && options.city.toLowerCase() !== event.city.toLowerCase()) {
-      return false;
-    }
-    if (
-      hasCoords &&
-      options.radiusKm > 0 &&
-      options.radiusKm < 1500 &&
-      event.latitude != null &&
-      event.longitude != null
-    ) {
-      const distance = calculateDistance(options.latitude, options.longitude, event.latitude, event.longitude);
-      return distance <= options.radiusKm;
-    }
-    return true;
-  });
-}
-
 function matchesTaste(event: ExternalEvent, preferredGenres: string[]) {
   if (preferredGenres.length === 0) return false;
   const normalizedPrefs = preferredGenres.map(g => g.toLowerCase());
@@ -275,44 +115,100 @@ function matchesTaste(event: ExternalEvent, preferredGenres: string[]) {
   return normalizedPrefs.some(genre => haystack.includes(genre));
 }
 
+const inferEventType = (event: AggregatedEvent) => {
+  const genreLookup = (event.genres || []).map(g => g.toLowerCase());
+  const text = `${event.title} ${event.description || ''}`.toLowerCase();
+  const hasAny = (terms: string[]) => terms.some(term => genreLookup.includes(term) || text.includes(term));
+
+  if (hasAny(['festival'])) return 'festival';
+  if (hasAny(['club', 'nightclub', 'club night'])) return 'club';
+  if (hasAny(['concert', 'live'])) return 'concert';
+  if (hasAny(['rave', 'warehouse', 'underground', 'afterparty'])) return 'rave';
+  return undefined;
+};
+
+const toExternalEvent = (event: AggregatedEvent): ExternalEvent | null => {
+  if (!event.startTime) return null;
+  return {
+    id: event.id,
+    externalId: event.id,
+    name: event.title,
+    description: event.description || undefined,
+    city: event.city || undefined,
+    venueName: event.venueName || undefined,
+    startDateTime: event.startTime,
+    endDateTime: event.endTime || undefined,
+    latitude: event.lat ?? undefined,
+    longitude: event.lng ?? undefined,
+    minPrice: event.priceFrom ?? undefined,
+    imageUrl: event.imageUrl ?? undefined,
+    eventType: inferEventType(event),
+    genres: event.genres || [],
+    source: event.source,
+  };
+};
+
 async function fetchExternalEvents(options: {
   city?: string;
   latitude?: number;
   longitude?: number;
   radiusKm: number;
   dateFilter?: DateFilter;
-}) {
-  if (EXTERNAL_EVENTS_API_URL) {
-    try {
-      const params = new URLSearchParams();
-      if (options.city) params.set('city', options.city);
-      if (options.latitude != null) params.set('lat', String(options.latitude));
-      if (options.longitude != null) params.set('lon', String(options.longitude));
-      params.set('radiusKm', String(options.radiusKm));
-      if (options.dateFilter) params.set('dateFilter', options.dateFilter);
-
-      const response = await fetch(`${EXTERNAL_EVENTS_API_URL}?${params.toString()}`, {
-        headers: EXTERNAL_EVENTS_API_KEY ? { Authorization: `Bearer ${EXTERNAL_EVENTS_API_KEY}` } : undefined,
-      });
-      if (response.ok) {
-        const payload = await response.json();
-        const events = Array.isArray(payload) ? payload : payload.events;
-        if (Array.isArray(events)) {
-          return events.map(ensureExternalId) as ExternalEvent[];
-        }
-      }
-    } catch {
-      // Fall back to mock data.
-    }
+  genres?: string[];
+  page?: number;
+  size?: number;
+}): Promise<{
+  events: ExternalEvent[];
+  page: number;
+  size: number;
+  totalPages: number;
+  totalElements: number;
+  source: string;
+}> {
+  const coords = resolveCoords(options.city, options.latitude, options.longitude);
+  if (!coords) {
+    return {
+      events: [],
+      page: options.page ?? 0,
+      size: options.size ?? 20,
+      totalPages: 0,
+      totalElements: 0,
+      source: 'ticketmaster',
+    };
   }
 
-  const filtered = filterByLocation(MOCK_EVENTS, {
-    city: options.city,
-    latitude: options.latitude,
-    longitude: options.longitude,
+  const range = getDateRange(options.dateFilter);
+  const response = await fetchAggregatedEvents({
+    lat: coords.lat,
+    lng: coords.lng,
     radiusKm: options.radiusKm,
-  }).filter(event => matchesDateFilter(event, options.dateFilter));
-  return filtered.map(ensureExternalId);
+    size: options.size,
+    page: options.page,
+    startDateTime: range ? formatDateTime(range.start) : undefined,
+    endDateTime: range ? formatDateTime(range.end) : undefined,
+    genres: options.genres,
+    electronicOnly: false,
+  });
+
+  const events = response.events
+    .map(toExternalEvent)
+    .filter((event): event is ExternalEvent => Boolean(event))
+    .map(ensureExternalId);
+
+  const filteredByDate = options.dateFilter
+    ? events.filter(event => matchesDateFilter(event, options.dateFilter))
+    : events;
+
+  return {
+    events: filteredByDate,
+    page: response.page,
+    size: response.size,
+    totalPages: response.sources?.ticketmaster?.totalPages
+      ?? response.sources?.tickster?.totalPages
+      ?? (response.hasMore ? (options.page ?? 0) + 2 : (options.page ?? 0) + 1),
+    totalElements: response.sources?.ticketmaster?.totalElements ?? 0,
+    source: 'aggregate',
+  };
 }
 
 export async function ensureSupabaseEvents(events: ExternalEvent[]) {
@@ -362,40 +258,75 @@ export async function fetchEventsWithFallback(options: {
   radiusKm: number;
   preferredGenres: string[];
   dateFilter?: DateFilter;
+  genres?: string[];
+  page?: number;
+  size?: number;
 }): Promise<{
   matchedToTaste: ExternalEvent[];
   suggestedEvents: ExternalEvent[];
+  page: number;
+  size: number;
+  totalPages: number;
+  totalElements: number;
+  source: string;
 }> {
   const baseRadius = options.radiusKm > 0 ? options.radiusKm : 25;
   const radiusSteps = baseRadius >= 1500
     ? [1500]
     : Array.from(new Set([baseRadius, 50, 100])).filter(r => r > 0);
 
-  let events: ExternalEvent[] = [];
+  const page = options.page ?? 0;
+  const size = options.size ?? 20;
+
+  let response = {
+    events: [] as ExternalEvent[],
+    page,
+    size,
+    totalPages: 0,
+    totalElements: 0,
+    source: 'ticketmaster',
+  };
+
   for (const radius of radiusSteps) {
-    events = await fetchExternalEvents({
+    response = await fetchExternalEvents({
       city: options.city,
       latitude: options.latitude,
       longitude: options.longitude,
       radiusKm: radius,
       dateFilter: options.dateFilter,
+      genres: options.genres,
+      page,
+      size,
     });
-    if (events.length > 0) break;
+    if (response.events.length > 0 || page > 0) break;
   }
 
-  if (events.length === 0) {
+  if (response.events.length === 0 && page === 0) {
     for (const fallbackCity of PRIORITY_CITIES) {
-      events = await fetchExternalEvents({
+      response = await fetchExternalEvents({
         city: fallbackCity,
+        latitude: options.latitude,
+        longitude: options.longitude,
         radiusKm: baseRadius,
         dateFilter: options.dateFilter,
+        genres: options.genres,
+        page,
+        size,
       });
-      if (events.length > 0) break;
+      if (response.events.length > 0) break;
     }
   }
 
-  const matchedToTaste = events.filter(event => matchesTaste(event, options.preferredGenres));
-  const suggestedEvents = events.filter(event => !matchesTaste(event, options.preferredGenres));
+  const matchedToTaste = response.events.filter(event => matchesTaste(event, options.preferredGenres));
+  const suggestedEvents = response.events.filter(event => !matchesTaste(event, options.preferredGenres));
 
-  return { matchedToTaste, suggestedEvents };
+  return {
+    matchedToTaste,
+    suggestedEvents,
+    page: response.page,
+    size: response.size,
+    totalPages: response.totalPages,
+    totalElements: response.totalElements,
+    source: response.source,
+  };
 }

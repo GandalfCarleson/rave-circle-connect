@@ -74,8 +74,19 @@ export default function Feed() {
   const [suggestedEvents, setSuggestedEvents] = useState<ExternalEvent[]>([]);
   const [interestedEvents, setInterestedEvents] = useState<Set<string>>(new Set());
   const [pinnedEvents, setPinnedEvents] = useState<Set<string>>(new Set());
-  const [visibleCount, setVisibleCount] = useState(12);
+  const [visibleCount, setVisibleCount] = useState(60);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      console.debug('[feed] mounted', {
+        authLoading,
+        hasUser: Boolean(user),
+      });
+    }
+  }, [authLoading, user]);
 
   const currentRadiusOption = RADIUS_OPTIONS.find(option => option.value === profile.radius_km) || RADIUS_OPTIONS[0];
 
@@ -138,44 +149,112 @@ export default function Feed() {
     }
   }, [user]);
 
-  const fetchEvents = useCallback(async () => {
-    setLoading(true);
-    setExpandingSearch(true);
-    const dateFilter = selectedDate === 'this-week'
-      ? 'this_week'
-      : selectedDate === 'next-week'
-        ? 'next_week'
-        : selectedDate === 'month'
-          ? 'this_month'
-          : selectedDate === 'year'
-            ? 'this_year'
-            : undefined;
+  const fetchEvents = useCallback(async (pageToLoad: number = 0) => {
+    if (import.meta.env.DEV) {
+      console.debug('[feed] fetch start', { page: pageToLoad });
+    }
+    if (pageToLoad === 0) {
+      setLoading(true);
+      setExpandingSearch(true);
+    } else {
+      setIsLoadingMore(true);
+    }
 
-    const { matchedToTaste, suggestedEvents: fallbackEvents } = await fetchEventsWithFallback({
-      city: profile.city || undefined,
-      latitude: profile.latitude ?? undefined,
-      longitude: profile.longitude ?? undefined,
-      radiusKm: profile.radius_km || RADIUS_OPTIONS[0].value,
-      preferredGenres,
-      dateFilter,
-    });
+    try {
+      const dateFilter = selectedDate === 'this-week'
+        ? 'this_week'
+        : selectedDate === 'next-week'
+          ? 'next_week'
+          : selectedDate === 'month'
+            ? 'this_month'
+            : selectedDate === 'year'
+              ? 'this_year'
+              : undefined;
 
-    const hydrated = await ensureSupabaseEvents([...matchedToTaste, ...fallbackEvents]);
-    const hydratedByExternal = new Map(
-      hydrated.map(event => [event.externalId || event.id, event])
-    );
-    const hydratedMatched = matchedToTaste.map(event =>
-      hydratedByExternal.get(event.externalId || event.id) || event
-    );
-    const hydratedSuggested = fallbackEvents.map(event =>
-      hydratedByExternal.get(event.externalId || event.id) || event
-    );
+      const {
+        matchedToTaste,
+        suggestedEvents: fallbackEvents,
+        page: nextPage,
+        totalPages: nextTotalPages,
+      } = await fetchEventsWithFallback({
+        city: profile.city || undefined,
+        latitude: profile.latitude ?? undefined,
+        longitude: profile.longitude ?? undefined,
+        radiusKm: profile.radius_km || RADIUS_OPTIONS[0].value,
+        preferredGenres,
+        dateFilter,
+        page: pageToLoad,
+        size: 20,
+        genres: selectedGenres.length > 0 ? selectedGenres : undefined,
+      });
 
-    setMatchedEvents(hydratedMatched);
-    setSuggestedEvents(hydratedSuggested);
-    setLoading(false);
-    setExpandingSearch(false);
-  }, [preferredGenres, profile.city, profile.latitude, profile.longitude, profile.radius_km, selectedDate]);
+      if (import.meta.env.DEV) {
+        console.debug('[feed] fetched', {
+          matched: matchedToTaste.length,
+          suggested: fallbackEvents.length,
+          page: nextPage,
+          totalPages: nextTotalPages,
+        });
+      }
+
+      const hydrated = await ensureSupabaseEvents([...matchedToTaste, ...fallbackEvents]);
+      const hydratedByExternal = new Map(
+        hydrated.map(event => [event.externalId || event.id, event])
+      );
+      const hydratedMatched = matchedToTaste.map(event =>
+        hydratedByExternal.get(event.externalId || event.id) || event
+      );
+      const hydratedSuggested = fallbackEvents.map(event =>
+        hydratedByExternal.get(event.externalId || event.id) || event
+      );
+
+      if (import.meta.env.DEV) {
+        console.debug('[feed] hydrated', {
+          matched: hydratedMatched.length,
+          suggested: hydratedSuggested.length,
+        });
+      }
+
+      if (pageToLoad === 0) {
+        setMatchedEvents(hydratedMatched);
+        setSuggestedEvents(hydratedSuggested);
+        setVisibleCount(60);
+    } else {
+      setMatchedEvents(prev => {
+        const merged = Array.from(
+          new Map([...prev, ...hydratedMatched].map(event => [event.externalId || event.id, event])).values(),
+        );
+        return merged;
+      });
+      setSuggestedEvents(prev => {
+        const merged = Array.from(
+          new Map([...prev, ...hydratedSuggested].map(event => [event.externalId || event.id, event])).values(),
+        );
+        return merged;
+      });
+      setVisibleCount(prev => prev + hydratedMatched.length + hydratedSuggested.length);
+    }
+
+      setPage(nextPage);
+      setTotalPages(nextTotalPages);
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.error('[feed] fetch error', error);
+      }
+    } finally {
+      setLoading(false);
+      setExpandingSearch(false);
+      setIsLoadingMore(false);
+    }
+  }, [
+    preferredGenres,
+    profile.city,
+    profile.latitude,
+    profile.longitude,
+    profile.radius_km,
+    selectedDate,
+    selectedGenres,
+  ]);
 
   const fetchEventActions = useCallback(async () => {
     if (!user) return;
@@ -258,7 +337,7 @@ export default function Feed() {
 
   useEffect(() => {
     if (user) {
-      fetchEvents();
+      fetchEvents(0);
     }
   }, [fetchEvents, user]);
 
@@ -303,6 +382,16 @@ export default function Feed() {
 
   const filteredMatched = matchedEvents.filter(eventMatchesFilters);
   const filteredSuggested = suggestedEvents.filter(eventMatchesFilters);
+  if (import.meta.env.DEV) {
+    console.debug('[feed] filtered', {
+      matched: filteredMatched.length,
+      suggested: filteredSuggested.length,
+      dateFilter: selectedDate,
+      radius: profile.radius_km,
+      selectedGenres,
+      selectedTypes,
+    });
+  }
 
   const sortedMatched = useMemo(() => {
     const hasCoords = profile.latitude != null && profile.longitude != null;
@@ -345,25 +434,29 @@ export default function Feed() {
   const visibleSuggested = sortedSuggested.filter(event => visibleEvents.includes(event));
 
   useEffect(() => {
-    setVisibleCount(12);
+    setVisibleCount(60);
   }, [orderedEvents.length]);
 
   useEffect(() => {
     const handleScroll = () => {
       if (loading || isLoadingMore) return;
-      if (visibleCount >= orderedEvents.length) return;
       const scrollPosition = window.innerHeight + window.scrollY;
       const threshold = document.body.offsetHeight - 300;
-      if (scrollPosition >= threshold) {
-        setIsLoadingMore(true);
-        setVisibleCount((prev) => Math.min(prev + 12, orderedEvents.length));
-        setTimeout(() => setIsLoadingMore(false), 300);
+      if (scrollPosition < threshold) return;
+
+      if (visibleCount < orderedEvents.length) {
+        setVisibleCount((prev) => Math.min(prev + 20, orderedEvents.length));
+        return;
+      }
+
+      if (page + 1 < totalPages) {
+        fetchEvents(page + 1);
       }
     };
 
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [loading, isLoadingMore, visibleCount, orderedEvents.length]);
+  }, [fetchEvents, isLoadingMore, loading, orderedEvents.length, page, totalPages, visibleCount]);
 
   const handleShare = (event: ExternalEvent) => {
     ensureEventReady(event).then((ready) => {
