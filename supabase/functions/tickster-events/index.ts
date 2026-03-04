@@ -41,11 +41,37 @@ const normalizeImage = (images: Array<{ url?: string; width?: number }> | undefi
   return withUrl.sort((a, b) => (b.width || 0) - (a.width || 0))[0]?.url ?? null;
 };
 
+const normalizeImageFromAny = (images: unknown) => {
+  if (Array.isArray(images)) {
+    return normalizeImage(images as Array<{ url?: string; width?: number }>);
+  }
+  if (images && typeof images === "object") {
+    const imageObject = images as Record<string, unknown>;
+    const candidates = [imageObject.large, imageObject.medium, imageObject.thumb, imageObject.original]
+      .filter((value): value is string => typeof value === "string" && value.length > 0);
+    return candidates[0] ?? null;
+  }
+  return null;
+};
+
 const toIso = (value: string | null | undefined) => {
   if (!value) return null;
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed.toISOString();
+};
+
+const pickFirst = (...values: Array<string | null | undefined>) => {
+  for (const value of values) {
+    if (value != null && value !== "") return value;
+  }
+  return null;
+};
+
+const toNumberOrNull = (value: unknown) => {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 };
 
 serve(async (req) => {
@@ -111,29 +137,59 @@ serve(async (req) => {
   const rateRemaining = response.headers.get("X-RATELIMIT-REMAINING");
 
   const payload = await response.json();
-  const items = Array.isArray(payload?.items) ? payload.items : Array.isArray(payload) ? payload : [];
-  const total = payload?.total ?? payload?.totalCount ?? items.length;
+  const items = Array.isArray(payload?.items)
+    ? payload.items
+    : Array.isArray(payload?.hits)
+      ? payload.hits
+    : Array.isArray(payload?.events)
+      ? payload.events
+      : Array.isArray(payload?.data?.events)
+        ? payload.data.events
+        : Array.isArray(payload?.results)
+          ? payload.results
+          : Array.isArray(payload)
+            ? payload
+            : [];
+  const total = payload?.total ?? payload?.totalCount ?? payload?.totalHits ?? items.length;
 
   const normalized = items.map((event: any) => ({
     id: `tickster_${event.id}`,
     source: "tickster",
     sourceId: String(event.id),
     title: event.name || event.title || "",
-    description: event.description || "",
-    startTime: toIso(event.start || event.startDate || event.startTime),
-    endTime: toIso(event.end || event.endDate || event.endTime),
+    description: event.description || event.text || "",
+    startTime: toIso(pickFirst(
+      event.start,
+      event.startDate,
+      event.startTime,
+      event.start_datetime,
+      event.date?.start,
+      event.date?.from,
+      event.time?.start,
+    )),
+    endTime: toIso(pickFirst(
+      event.end,
+      event.endDate,
+      event.endTime,
+      event.end_datetime,
+      event.date?.end,
+      event.date?.to,
+      event.time?.end,
+    )),
     timezone: event.timezone || null,
-    venueName: event.venue?.name || event.location?.name || null,
-    city: event.venue?.city || event.location?.city || null,
-    country: event.venue?.countryCode || event.location?.countryCode || null,
-    address: event.venue?.address || event.location?.address || null,
-    lat: event.venue?.latitude ?? event.location?.latitude ?? null,
-    lng: event.venue?.longitude ?? event.location?.longitude ?? null,
-    imageUrl: normalizeImage(event.images || event.imageUrls),
-    ticketUrl: event.shopUri || event.infoUri || null,
-    priceFrom: event.minPrice ?? null,
-    currency: event.currency || null,
-    genres: Array.isArray(event.tags) ? event.tags : [],
+    venueName: event.venue?.name || event.location?.name || event.place?.name || null,
+    city: event.venue?.city?.name || event.venue?.city || event.location?.city?.name || event.location?.city || event.place?.city || null,
+    country: event.venue?.countryCode || event.location?.countryCode || event.place?.countryCode || null,
+    address: event.venue?.address?.line1 || event.venue?.address || event.location?.address || event.place?.address || null,
+    lat: toNumberOrNull(event.venue?.latitude ?? event.location?.latitude ?? event.place?.latitude),
+    lng: toNumberOrNull(event.venue?.longitude ?? event.location?.longitude ?? event.place?.longitude),
+    imageUrl: normalizeImageFromAny(event.images || event.imageUrls || event.media?.images),
+    ticketUrl: event.shopUri || event.infoUri || event.url || event.links?.shop || null,
+    priceFrom: toNumberOrNull(event.minPrice ?? event.price?.from),
+    currency: event.currency || event.price?.currency || null,
+    genres: Array.isArray(event.tags)
+      ? event.tags.map((tag: any) => typeof tag === "string" ? tag : (tag?.name || "")).filter(Boolean)
+      : [],
   }));
 
   const responseBody = {

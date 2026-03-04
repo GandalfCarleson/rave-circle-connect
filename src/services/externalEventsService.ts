@@ -164,16 +164,20 @@ async function fetchExternalEvents(options: {
   totalPages: number;
   totalElements: number;
   source: string;
+  notice?: string;
+  hasMore: boolean;
 }> {
   const coords = resolveCoords(options.city, options.latitude, options.longitude);
   if (!coords) {
     return {
       events: [],
       page: options.page ?? 0,
-      size: options.size ?? 20,
+      size: options.size ?? 60,
       totalPages: 0,
       totalElements: 0,
       source: 'ticketmaster',
+      notice: undefined,
+      hasMore: false,
     };
   }
 
@@ -203,11 +207,11 @@ async function fetchExternalEvents(options: {
     events: filteredByDate,
     page: response.page,
     size: response.size,
-    totalPages: response.sources?.ticketmaster?.totalPages
-      ?? response.sources?.tickster?.totalPages
-      ?? (response.hasMore ? (options.page ?? 0) + 2 : (options.page ?? 0) + 1),
-    totalElements: response.sources?.ticketmaster?.totalElements ?? 0,
+    totalPages: response.hasMore ? (response.page + 2) : (response.page + 1),
+    totalElements: response.hasMore ? ((response.page + 1) * response.size) + 1 : ((response.page + 1) * response.size),
     source: 'aggregate',
+    notice: response.notice,
+    hasMore: response.hasMore,
   };
 }
 
@@ -269,6 +273,8 @@ export async function fetchEventsWithFallback(options: {
   totalPages: number;
   totalElements: number;
   source: string;
+  notice?: string;
+  hasMore: boolean;
 }> {
   const baseRadius = options.radiusKm > 0 ? options.radiusKm : 25;
   const radiusSteps = baseRadius >= 1500
@@ -276,7 +282,7 @@ export async function fetchEventsWithFallback(options: {
     : Array.from(new Set([baseRadius, 50, 100])).filter(r => r > 0);
 
   const page = options.page ?? 0;
-  const size = options.size ?? 20;
+  const size = options.size ?? 60;
 
   let response = {
     events: [] as ExternalEvent[],
@@ -285,6 +291,8 @@ export async function fetchEventsWithFallback(options: {
     totalPages: 0,
     totalElements: 0,
     source: 'ticketmaster',
+    notice: undefined,
+    hasMore: false,
   };
 
   for (const radius of radiusSteps) {
@@ -328,5 +336,7 @@ export async function fetchEventsWithFallback(options: {
     totalPages: response.totalPages,
     totalElements: response.totalElements,
     source: response.source,
+    notice: response.notice,
+    hasMore: response.hasMore,
   };
 }

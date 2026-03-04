@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Settings2, Calendar, Filter, MapPin, Compass } from 'lucide-react';
+import { Settings2, Calendar, Filter, MapPin, Compass, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EventCard } from '@/components/EventCard';
 import { GenreChip } from '@/components/GenreChip';
@@ -77,7 +77,9 @@ export default function Feed() {
   const [visibleCount, setVisibleCount] = useState(60);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [page, setPage] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     if (import.meta.env.DEV) {
@@ -101,6 +103,15 @@ export default function Feed() {
       setLocationStatus('denied');
       return;
     }
+    if (!window.isSecureContext) {
+      setLocationStatus('denied');
+      toast({
+        title: 'Location unavailable',
+        description: 'Use https:// or localhost to allow browser location access.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
@@ -115,11 +126,17 @@ export default function Feed() {
         
         setProfile(prev => ({ ...prev, latitude, longitude }));
       },
-      () => {
+      (error) => {
         setLocationStatus('denied');
-      }
+        toast({
+          title: 'Location blocked',
+          description: error.message || 'Enable location permissions in your browser settings.',
+          variant: 'destructive',
+        });
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
     );
-  }, [user]);
+  }, [toast, user]);
 
   const fetchProfile = useCallback(async () => {
     if (!user) return;
@@ -175,7 +192,8 @@ export default function Feed() {
         matchedToTaste,
         suggestedEvents: fallbackEvents,
         page: nextPage,
-        totalPages: nextTotalPages,
+        hasMore: nextHasMore,
+        notice: nextNotice,
       } = await fetchEventsWithFallback({
         city: profile.city || undefined,
         latitude: profile.latitude ?? undefined,
@@ -184,7 +202,7 @@ export default function Feed() {
         preferredGenres,
         dateFilter,
         page: pageToLoad,
-        size: 20,
+        size: 60,
         genres: selectedGenres.length > 0 ? selectedGenres : undefined,
       });
 
@@ -193,7 +211,7 @@ export default function Feed() {
           matched: matchedToTaste.length,
           suggested: fallbackEvents.length,
           page: nextPage,
-          totalPages: nextTotalPages,
+          hasMore: nextHasMore,
         });
       }
 
@@ -219,32 +237,31 @@ export default function Feed() {
         setMatchedEvents(hydratedMatched);
         setSuggestedEvents(hydratedSuggested);
         setVisibleCount(60);
-    } else {
-      setMatchedEvents(prev => {
-        const merged = Array.from(
-          new Map([...prev, ...hydratedMatched].map(event => [event.externalId || event.id, event])).values(),
-        );
-        return merged;
-      });
-      setSuggestedEvents(prev => {
-        const merged = Array.from(
-          new Map([...prev, ...hydratedSuggested].map(event => [event.externalId || event.id, event])).values(),
-        );
-        return merged;
-      });
-      setVisibleCount(prev => prev + hydratedMatched.length + hydratedSuggested.length);
-    }
+        setNotice(nextNotice ?? null);
+      } else {
+        setMatchedEvents(prev => Array.from(
+          new Map([...prev, ...hydratedMatched].map(event => [event.id, event])).values(),
+        ));
+        setSuggestedEvents(prev => Array.from(
+          new Map([...prev, ...hydratedSuggested].map(event => [event.id, event])).values(),
+        ));
+        setVisibleCount(prev => prev + hydratedMatched.length + hydratedSuggested.length);
+      }
 
       setPage(nextPage);
-      setTotalPages(nextTotalPages);
+      setHasMore(nextHasMore);
     } catch (error) {
       if (import.meta.env.DEV) {
         console.error('[feed] fetch error', error);
+      }
+      if (pageToLoad === 0) {
+        setNotice('Unable to refresh events right now. Please try again.');
       }
     } finally {
       setLoading(false);
       setExpandingSearch(false);
       setIsLoadingMore(false);
+      setIsRefreshing(false);
     }
   }, [
     preferredGenres,
@@ -255,6 +272,14 @@ export default function Feed() {
     selectedDate,
     selectedGenres,
   ]);
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await fetchEvents(0);
+    if (notice) {
+      toast({ title: notice });
+    }
+  }, [fetchEvents, notice, toast]);
 
   const fetchEventActions = useCallback(async () => {
     if (!user) return;
@@ -449,14 +474,14 @@ export default function Feed() {
         return;
       }
 
-      if (page + 1 < totalPages) {
+      if (hasMore) {
         fetchEvents(page + 1);
       }
     };
 
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [fetchEvents, isLoadingMore, loading, orderedEvents.length, page, totalPages, visibleCount]);
+  }, [fetchEvents, hasMore, isLoadingMore, loading, orderedEvents.length, page, visibleCount]);
 
   const handleShare = (event: ExternalEvent) => {
     ensureEventReady(event).then((ready) => {
@@ -662,6 +687,14 @@ export default function Feed() {
               <Button
                 variant="ghost"
                 size="icon"
+                onClick={handleRefresh}
+                disabled={loading || isRefreshing}
+              >
+                <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => setFiltersOpen(prev => !prev)}
               >
                 <Filter className="w-5 h-5" />
@@ -694,7 +727,12 @@ export default function Feed() {
           </div>
 
           {/* Location indicator */}
-          <div className="flex items-center gap-2 text-sm text-muted-foreground mb-4">
+          <button
+            type="button"
+            onClick={requestLocation}
+            className="flex items-center gap-2 text-sm text-muted-foreground mb-4 hover:text-foreground transition-colors"
+            title="Use current location"
+          >
             <MapPin className="w-4 h-4" />
             {profile.city ? (
               <>
@@ -705,7 +743,7 @@ export default function Feed() {
             ) : (
               <span className="text-primary font-medium">{currentRadiusOption.display}</span>
             )}
-          </div>
+          </button>
 
           {/* Date filters */}
           <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 scrollbar-hide">
@@ -719,6 +757,11 @@ export default function Feed() {
               </button>
             ))}
           </div>
+          {notice ? (
+            <div className="mt-3 rounded-lg border border-border/60 bg-card/50 px-3 py-2 text-xs text-muted-foreground">
+              {notice}
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -809,7 +852,7 @@ export default function Feed() {
               <div className="space-y-4">
                 {visibleMatched.map((event, index) => (
                   <motion.div
-                    key={event.externalId || event.id}
+                    key={event.id}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.05 }}
@@ -825,6 +868,7 @@ export default function Feed() {
                       imageUrl={event.imageUrl || undefined}
                       eventType={event.eventType || undefined}
                       genres={event.genres || []}
+                      source={event.source}
                       distance={
                         profile.latitude && profile.longitude && event.latitude && event.longitude
                           ? Math.round(calculateDistance(
@@ -854,7 +898,7 @@ export default function Feed() {
                 )}
                 {visibleSuggested.map((event, index) => (
                   <motion.div
-                    key={event.externalId || event.id}
+                    key={event.id}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.05 }}
@@ -870,6 +914,7 @@ export default function Feed() {
                       imageUrl={event.imageUrl || undefined}
                       eventType={event.eventType || undefined}
                       genres={event.genres || []}
+                      source={event.source}
                       distance={
                         profile.latitude && profile.longitude && event.latitude && event.longitude
                           ? Math.round(calculateDistance(

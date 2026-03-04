@@ -25,9 +25,10 @@ export type AggregatedEventsResponse = {
   page: number;
   size: number;
   hasMore: boolean;
+  notice?: string;
   sources?: {
-    ticketmaster?: { totalPages?: number; totalElements?: number };
-    tickster?: { totalPages?: number; totalElements?: number };
+    ticketmaster?: { ok: boolean; error?: string; count: number };
+    tickster?: { ok: boolean; error?: string; count: number };
   };
 };
 
@@ -65,22 +66,42 @@ export async function fetchAggregatedEvents(params: AggregateQuery): Promise<Agg
   if (params.genres && params.genres.length > 0) query.set('genres', params.genres.join(','));
   if (params.electronicOnly !== undefined) query.set('electronicOnly', String(params.electronicOnly));
 
+  const { data: { session } } = await supabase.auth.getSession();
+  const accessToken = session?.access_token;
+  const anonJwt = supabaseKey.startsWith('eyJ') ? supabaseKey : undefined;
+  const bearerToken = accessToken || anonJwt;
+
+  const headers: Record<string, string> = {};
+  const anonKey = supabaseKey.startsWith('eyJ') ? supabaseKey : undefined;
+  if (anonKey) {
+    headers.apikey = anonKey;
+  }
+  if (bearerToken) {
+    headers.Authorization = `Bearer ${bearerToken}`;
+  }
+
   const response = await fetch(`${supabaseUrl}/functions/v1/events-aggregate?${query.toString()}`, {
     method: 'GET',
-    headers: {
-      apikey: supabaseKey,
-      Authorization: `Bearer ${supabaseKey}`,
-    },
+    headers,
   });
 
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
+    if (import.meta.env.DEV) {
+      console.error('[events-aggregate] request failed', {
+        status: response.status,
+        hasSessionToken: Boolean(accessToken),
+        authHeaderSent: Boolean(headers.Authorization),
+        error: payload,
+      });
+    }
     const message =
       payload?.error?.message ||
       payload?.message ||
-      'Unable to load events.';
+      `Unable to load events (HTTP ${response.status}).`;
     throw new Error(message);
   }
 
   return payload as AggregatedEventsResponse;
 }
+import { supabase } from '@/integrations/supabase/client';

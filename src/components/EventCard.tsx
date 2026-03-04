@@ -16,6 +16,7 @@ interface EventCardProps {
   imageUrl?: string;
   eventType?: string;
   genres?: string[];
+  source?: string;
   distance?: number;
   onView?: () => void;
   onShare?: () => void;
@@ -36,6 +37,7 @@ export function EventCard({
   imageUrl,
   eventType,
   genres = [],
+  source,
   distance,
   onView,
   onShare,
@@ -74,6 +76,11 @@ export function EventCard({
           ? 'bg-accent/90 text-accent-foreground'
           : 'bg-muted text-foreground'
     : '';
+  const sourceLabel = source === 'ticketmaster'
+    ? 'Ticketmaster'
+    : source === 'tickster'
+      ? 'Tickster'
+      : source;
 
   if (compact) {
     return (
@@ -128,6 +135,11 @@ export function EventCard({
         {eventTypeLabel && (
           <span className={cn('absolute top-3 left-3 px-2.5 py-1 rounded-full text-xs font-medium', eventTypeClass)}>
             {eventTypeLabel}
+          </span>
+        )}
+        {sourceLabel && (
+          <span className="absolute bottom-3 left-3 rounded-full border border-border/70 bg-card/80 px-2.5 py-1 text-xs font-medium text-foreground backdrop-blur-sm">
+            {sourceLabel}
           </span>
         )}
 

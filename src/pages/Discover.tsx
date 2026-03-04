@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Compass, Users, Calendar, TrendingUp } from 'lucide-react';
+import { Compass, Users, Calendar, TrendingUp, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GroupCard } from '@/components/GroupCard';
 import { EventCard } from '@/components/EventCard';
@@ -55,7 +55,9 @@ export default function Discover() {
   const [visibleCount, setVisibleCount] = useState(12);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [page, setPage] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     if (import.meta.env.DEV) {
@@ -109,7 +111,8 @@ export default function Discover() {
         matchedToTaste,
         suggestedEvents,
         page: nextPage,
-        totalPages: nextTotalPages,
+        hasMore: nextHasMore,
+        notice: nextNotice,
       } = await fetchEventsWithFallback({
         city: profileSnapshot.city || undefined,
         latitude: profileSnapshot.latitude ?? undefined,
@@ -117,7 +120,7 @@ export default function Discover() {
         radiusKm: profileSnapshot.radius_km || RADIUS_OPTIONS[0].value,
         preferredGenres: preferencesSnapshot,
         page: pageToLoad,
-        size: 20,
+        size: 60,
       });
 
       if (import.meta.env.DEV) {
@@ -125,7 +128,7 @@ export default function Discover() {
           matched: matchedToTaste.length,
           suggested: suggestedEvents.length,
           page: nextPage,
-          totalPages: nextTotalPages,
+          hasMore: nextHasMore,
         });
       }
 
@@ -152,14 +155,17 @@ export default function Discover() {
         : hydratedSuggested;
 
       if (append) {
-        setRecommendedEvents(prev => [...prev, ...combined]);
+        setRecommendedEvents(prev => Array.from(
+          new Map([...prev, ...combined].map((event) => [event.id, event])).values(),
+        ));
         setVisibleCount(prev => prev + combined.length);
       } else {
         setRecommendedEvents(combined);
         setVisibleCount(12);
+        setNotice(nextNotice ?? null);
       }
       setPage(nextPage);
-      setTotalPages(nextTotalPages);
+      setHasMore(nextHasMore);
     } catch (error) {
       if (import.meta.env.DEV) {
         console.error('[discover] fetch error', error);
@@ -170,84 +176,96 @@ export default function Discover() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     setLoadingTrending(true);
-    let currentProfile: Profile = {
-      city: null,
-      radius_km: RADIUS_OPTIONS[0].value,
-      latitude: null,
-      longitude: null,
-    };
-    let currentPreferences: string[] = [];
-    if (user) {
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('city, radius_km, latitude, longitude')
-        .eq('user_id', user.id)
-        .single();
-      
-      if (profileData) {
-        const radiusValue = RADIUS_OPTIONS.some(option => option.value === profileData.radius_km)
-          ? profileData.radius_km
-          : RADIUS_OPTIONS[0].value;
-        const nextProfile = { ...profileData, radius_km: radiusValue };
-        setProfile(nextProfile);
-        currentProfile = nextProfile;
-      }
-
-      const { data: preferences } = await supabase
-        .from('user_preferences')
-        .select('genre')
-        .eq('user_id', user.id);
-      
-      if (preferences) {
-        currentPreferences = preferences.map(pref => pref.genre);
-        setPreferredGenres(currentPreferences);
-      }
-    }
-
-    if (user) {
-      const { data: memberGroups } = await supabase
-        .from('group_members')
-        .select('group_id')
-        .eq('user_id', user.id);
-      
-      if (memberGroups && memberGroups.length > 0) {
-        const groupIds = memberGroups.map(m => m.group_id);
-        const { data: groups } = await supabase
-          .from('groups')
-          .select('id, name')
-          .in('id', groupIds);
+    setIsRefreshing(true);
+    try {
+      let currentProfile: Profile = {
+        city: null,
+        radius_km: RADIUS_OPTIONS[0].value,
+        latitude: null,
+        longitude: null,
+      };
+      let currentPreferences: string[] = [];
+      if (user) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('city, radius_km, latitude, longitude')
+          .eq('user_id', user.id)
+          .single();
         
-        if (groups) {
-          setUserGroups(groups);
+        if (profileData) {
+          const radiusValue = RADIUS_OPTIONS.some(option => option.value === profileData.radius_km)
+            ? profileData.radius_km
+            : RADIUS_OPTIONS[0].value;
+          const nextProfile = { ...profileData, radius_km: radiusValue };
+          setProfile(nextProfile);
+          currentProfile = nextProfile;
+        }
+
+        const { data: preferences } = await supabase
+          .from('user_preferences')
+          .select('genre')
+          .eq('user_id', user.id);
+        
+        if (preferences) {
+          currentPreferences = preferences.map(pref => pref.genre);
+          setPreferredGenres(currentPreferences);
         }
       }
+
+      if (user) {
+        const { data: memberGroups } = await supabase
+          .from('group_members')
+          .select('group_id')
+          .eq('user_id', user.id);
+        
+        if (memberGroups && memberGroups.length > 0) {
+          const groupIds = memberGroups.map(m => m.group_id);
+          const { data: groups } = await supabase
+            .from('groups')
+            .select('id, name')
+            .in('id', groupIds);
+          
+          if (groups) {
+            setUserGroups(groups);
+          }
+        }
+      }
+
+      // Fetch open groups
+      const { data: groups } = await supabase
+        .from('groups')
+        .select('*')
+        .eq('is_private', false)
+        .limit(5);
+
+      if (groups) {
+        const groupsWithCounts = await Promise.all(
+          groups.map(async (group) => {
+            const { count } = await supabase
+              .from('group_members')
+              .select('*', { count: 'exact', head: true })
+              .eq('group_id', group.id);
+            return { ...group, member_count: count || 0 };
+          })
+        );
+        setOpenGroups(groupsWithCounts);
+      }
+
+      await fetchRecommendedEvents(0, currentProfile, currentPreferences, false);
+
+      await fetchTrendingEvents();
+      setLoading(false);
+    } finally {
+      setIsRefreshing(false);
     }
-
-    // Fetch open groups
-    const { data: groups } = await supabase
-      .from('groups')
-      .select('*')
-      .eq('is_private', false)
-      .limit(5);
-
-    if (groups) {
-      const groupsWithCounts = await Promise.all(
-        groups.map(async (group) => {
-          const { count } = await supabase
-            .from('group_members')
-            .select('*', { count: 'exact', head: true })
-            .eq('group_id', group.id);
-          return { ...group, member_count: count || 0 };
-        })
-      );
-      setOpenGroups(groupsWithCounts);
-    }
-
-    await fetchRecommendedEvents(0, currentProfile, currentPreferences, false);
-
-    await fetchTrendingEvents();
-    setLoading(false);
   }, [fetchRecommendedEvents, fetchTrendingEvents, user]);
+
+  const handleRefresh = useCallback(async () => {
+    await fetchData();
+    if (notice) {
+      toast({ title: notice });
+    }
+  }, [fetchData, notice, toast]);
 
   const sortedEvents = useMemo(() => {
     const hasCoords = profile.latitude != null && profile.longitude != null;
@@ -293,7 +311,7 @@ export default function Discover() {
         return;
       }
 
-      if (page + 1 < totalPages) {
+      if (hasMore) {
         setIsLoadingMore(true);
         fetchRecommendedEvents(page + 1, profile, preferredGenres, true)
           .finally(() => setIsLoadingMore(false));
@@ -302,7 +320,7 @@ export default function Discover() {
 
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
-  }, [fetchRecommendedEvents, isLoadingMore, loading, page, preferredGenres, profile, sortedEvents.length, totalPages, visibleCount]);
+  }, [fetchRecommendedEvents, hasMore, isLoadingMore, loading, page, preferredGenres, profile, sortedEvents.length, visibleCount]);
 
   const fetchEventActions = useCallback(async () => {
     if (!user) return;
@@ -554,8 +572,23 @@ export default function Discover() {
       {/* Header */}
       <div className="sticky top-0 z-40 glass border-b border-border/50">
         <div className="max-w-lg mx-auto px-4 py-4">
-          <h1 className="text-xl font-display font-bold">Discover</h1>
+          <div className="mb-1 flex items-center justify-between">
+            <h1 className="text-xl font-display font-bold">Discover</h1>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleRefresh}
+              disabled={loading || isRefreshing}
+            >
+              <RefreshCw className={`w-5 h-5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
           <p className="text-sm text-muted-foreground">Find new crews and events</p>
+          {notice ? (
+            <div className="mt-3 rounded-lg border border-border/60 bg-card/50 px-3 py-2 text-xs text-muted-foreground">
+              {notice}
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -649,7 +682,7 @@ export default function Discover() {
             <div className="space-y-4">
               {trendingEvents.map((event, index) => (
                 <motion.div
-                  key={event.externalId || event.id}
+                  key={event.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.05 }}
@@ -665,6 +698,7 @@ export default function Discover() {
                     imageUrl={event.imageUrl || undefined}
                     eventType={event.eventType || undefined}
                     genres={event.genres || []}
+                    source={event.source}
                     onView={() => event.supabaseId && navigate(`/events/${event.supabaseId}`)}
                     onShare={() => handleShare(event)}
                     onToggleInterested={() => toggleInterested(event)}
@@ -711,7 +745,7 @@ export default function Discover() {
             <div className="space-y-4">
               {visibleEvents.map((event, index) => (
                 <motion.div
-                  key={event.externalId || event.id}
+                  key={event.id}
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
@@ -727,6 +761,7 @@ export default function Discover() {
                     imageUrl={event.imageUrl || undefined}
                     eventType={event.eventType || undefined}
                     genres={event.genres || []}
+                    source={event.source}
                     onView={() => event.supabaseId && navigate(`/events/${event.supabaseId}`)}
                     onShare={() => handleShare(event)}
                     onToggleInterested={() => toggleInterested(event)}

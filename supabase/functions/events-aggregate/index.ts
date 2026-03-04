@@ -14,6 +14,13 @@ const jsonResponse = (body: unknown, status = 200) =>
 type CacheEntry = { expiresAt: number; payload: unknown };
 const cache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const PROVIDER_TIMEOUT_MS = 7000;
+const MAX_RETRIES = 2;
+const RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000;
+const providerCooldownUntil: Record<"ticketmaster" | "tickster", number> = {
+  ticketmaster: 0,
+  tickster: 0,
+};
 
 const getCached = (key: string) => {
   const entry = cache.get(key);
@@ -138,6 +145,88 @@ const dedupeEvents = (events: any[]) => {
   return final;
 };
 
+type ProviderResult = {
+  ok: boolean;
+  events: any[];
+  totalPages?: number;
+  totalElements?: number;
+  error?: string;
+  count: number;
+  statusCode?: number;
+};
+
+const jitter = () => Math.floor(Math.random() * 200);
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const fetchWithTimeout = async (url: string, headers: Record<string, string>) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+  try {
+    return await fetch(url, { headers, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const fetchProvider = async (
+  provider: "ticketmaster" | "tickster",
+  url: URL,
+  headers: Record<string, string>,
+): Promise<ProviderResult> => {
+  if (Date.now() < providerCooldownUntil[provider]) {
+    return {
+      ok: false,
+      events: [],
+      count: 0,
+      statusCode: 429,
+      error: "429 cooldown active",
+    };
+  }
+
+  let attempt = 0;
+  let lastError = "Unknown error";
+
+  while (attempt <= MAX_RETRIES) {
+    try {
+      const response = await fetchWithTimeout(url.toString(), headers);
+      if (response.ok) {
+        const payload = await response.json();
+        const events = Array.isArray(payload?.events) ? payload.events : [];
+        return {
+          ok: true,
+          events,
+          totalPages: payload?.totalPages,
+          totalElements: payload?.totalElements,
+          count: events.length,
+        };
+      }
+
+      const shouldRetry = response.status === 429 || response.status >= 500;
+      const errorText = await response.text();
+      lastError = `${response.status} ${response.statusText}${errorText ? `: ${errorText.slice(0, 120)}` : ""}`;
+
+      if (response.status === 429) {
+        providerCooldownUntil[provider] = Date.now() + RATE_LIMIT_COOLDOWN_MS;
+      }
+
+      if (!shouldRetry || attempt === MAX_RETRIES) {
+        return { ok: false, events: [], error: lastError, count: 0, statusCode: response.status };
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : "Request failed";
+      if (attempt === MAX_RETRIES) {
+        return { ok: false, events: [], error: lastError, count: 0 };
+      }
+    }
+
+    attempt += 1;
+    await delay(250 * Math.pow(2, attempt) + jitter());
+  }
+
+  return { ok: false, events: [], error: lastError, count: 0 };
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -169,7 +258,7 @@ serve(async (req) => {
 
   const radiusKmParam = url.searchParams.get("radiusKm");
   const radiusKm = radiusKmParam ? Number(radiusKmParam) : null;
-  const size = Math.min(toNumber(url.searchParams.get("size"), 20), 50);
+  const size = Math.min(toNumber(url.searchParams.get("size"), 60), 100);
   const page = Math.max(0, toNumber(url.searchParams.get("page"), 0));
   const electronicOnly = false;
   const selectedGenres: string[] = [];
@@ -183,8 +272,20 @@ serve(async (req) => {
   }
 
   const headers: Record<string, string> = {};
-  if (anonKey) {
+  const requestAuthHeader = req.headers.get("authorization");
+  const requestApiKeyHeader = req.headers.get("apikey");
+
+  // Prefer the incoming caller auth for internal function-to-function calls.
+  // Fall back to env anon key if caller headers are absent.
+  if (requestAuthHeader) {
+    headers.Authorization = requestAuthHeader;
+  } else if (anonKey) {
     headers.Authorization = `Bearer ${anonKey}`;
+  }
+
+  if (requestApiKeyHeader) {
+    headers.apikey = requestApiKeyHeader;
+  } else if (anonKey) {
     headers.apikey = anonKey;
   }
 
@@ -206,8 +307,8 @@ serve(async (req) => {
 
   let extraPage = 0;
   let merged: any[] = [];
-  let tmMeta = { totalPages: 0, totalElements: 0 };
-  let tkMeta = { totalPages: 0, totalElements: 0 };
+  let tmMeta = { totalPages: 0, totalElements: 0, ok: false, error: "", count: 0 };
+  let tkMeta = { totalPages: 0, totalElements: 0, ok: false, error: "", count: 0 };
 
   while (merged.length < size && extraPage < 3) {
     if (extraPage > 0) {
@@ -215,26 +316,51 @@ serve(async (req) => {
       ticksterUrl.searchParams.set("page", String(page + extraPage));
     }
 
-    const [tmRes, tkRes] = await Promise.all([
-      fetch(ticketmasterUrl.toString(), { headers }),
-      fetch(ticksterUrl.toString(), { headers }),
+    const [tmResult, tkResult] = await Promise.all([
+      fetchProvider("ticketmaster", ticketmasterUrl, headers),
+      fetchProvider("tickster", ticksterUrl, headers),
     ]);
 
-    const tmPayload = tmRes.ok ? await tmRes.json() : { events: [] };
-    const tkPayload = tkRes.ok ? await tkRes.json() : { events: [] };
+    if (!tmMeta.ok && tmResult.ok) tmMeta.ok = true;
+    if (!tkMeta.ok && tkResult.ok) tkMeta.ok = true;
+    if (tmResult.error) tmMeta.error = tmResult.error;
+    if (tkResult.error) tkMeta.error = tkResult.error;
+    tmMeta.count += tmResult.count;
+    tkMeta.count += tkResult.count;
 
     tmMeta = {
-      totalPages: tmPayload?.totalPages ?? tmMeta.totalPages,
-      totalElements: tmPayload?.totalElements ?? tmMeta.totalElements,
+      ...tmMeta,
+      totalPages: tmResult.totalPages ?? tmMeta.totalPages,
+      totalElements: tmResult.totalElements ?? tmMeta.totalElements,
     };
     tkMeta = {
-      totalPages: tkPayload?.totalPages ?? tkMeta.totalPages,
-      totalElements: tkPayload?.totalElements ?? tkMeta.totalElements,
+      ...tkMeta,
+      totalPages: tkResult.totalPages ?? tkMeta.totalPages,
+      totalElements: tkResult.totalElements ?? tkMeta.totalElements,
     };
 
-    const combined = [...(tmPayload?.events || []), ...(tkPayload?.events || [])];
+    const combined = [...tmResult.events, ...tkResult.events];
     merged = merged.concat(combined);
     extraPage += 1;
+
+    if (!tmResult.ok && !tkResult.ok) {
+      break;
+    }
+  }
+
+  if (!tmMeta.ok && !tkMeta.ok) {
+    const responseBody = {
+      events: [],
+      page,
+      size,
+      hasMore: false,
+      notice: "Events providers are temporarily unavailable. Please try again.",
+      sources: {
+        ticketmaster: { ok: false, error: tmMeta.error || "Unavailable", count: 0 },
+        tickster: { ok: false, error: tkMeta.error || "Unavailable", count: 0 },
+      },
+    };
+    return jsonResponse(responseBody, 502);
   }
 
   let deduped = dedupeEvents(merged);
@@ -261,21 +387,64 @@ serve(async (req) => {
     return aTime - bTime;
   });
 
-  const start = page * size;
-  const end = start + size;
-  const pageEvents = deduped.slice(start, end);
-  const hasMore = end < deduped.length || page + 1 < Math.max(tmMeta.totalPages, tkMeta.totalPages);
+  let pageEvents = deduped.slice(0, size);
+  const hasTicketmasterEvent = pageEvents.some((event) => event.source === "ticketmaster");
+  const hasTicksterEvent = pageEvents.some((event) => event.source === "tickster");
+  if (tmMeta.ok && tkMeta.ok && pageEvents.length > 0 && (!hasTicketmasterEvent || !hasTicksterEvent)) {
+    const wantedSource = hasTicketmasterEvent ? "tickster" : "ticketmaster";
+    const supplemental = deduped
+      .filter((event) => event.source === wantedSource)
+      .filter((event) => !pageEvents.some((existing) => existing.id === event.id))
+      .slice(0, Math.min(5, size));
+    if (supplemental.length > 0) {
+      pageEvents = [...pageEvents, ...supplemental]
+        .sort((a, b) => {
+          const aTime = a.startTime ? new Date(a.startTime).getTime() : 0;
+          const bTime = b.startTime ? new Date(b.startTime).getTime() : 0;
+          return aTime - bTime;
+        })
+        .slice(0, size);
+    }
+  }
+  const hasMore = deduped.length > size || page + 1 < Math.max(tmMeta.totalPages, tkMeta.totalPages);
+  let notice: string | undefined;
+  if (!tmMeta.ok && tkMeta.ok) {
+    notice = "Showing Tickster events (Ticketmaster temporarily unavailable).";
+  } else if (tmMeta.ok && !tkMeta.ok) {
+    notice = "Showing Ticketmaster events (Tickster temporarily unavailable).";
+  } else if (tmMeta.ok && tkMeta.ok && tmMeta.count === 0 && tkMeta.count > 0) {
+    notice = "Showing Tickster events in this area/time window.";
+  } else if (tmMeta.ok && tkMeta.ok && tkMeta.count === 0 && tmMeta.count > 0) {
+    notice = "Showing Ticketmaster events in this area/time window.";
+  }
 
   const responseBody = {
     events: pageEvents,
     page,
     size,
     hasMore,
+    notice,
     sources: {
-      ticketmaster: tmMeta,
-      tickster: tkMeta,
+      ticketmaster: {
+        ok: tmMeta.ok,
+        count: tmMeta.count,
+        ...(tmMeta.error ? { error: tmMeta.error } : {}),
+      },
+      tickster: {
+        ok: tkMeta.ok,
+        count: tkMeta.count,
+        ...(tkMeta.error ? { error: tkMeta.error } : {}),
+      },
     },
   };
+
+  console.log("events-aggregate", {
+    page,
+    size,
+    returned: pageEvents.length,
+    ticketmaster: { ok: tmMeta.ok, count: tmMeta.count },
+    tickster: { ok: tkMeta.ok, count: tkMeta.count },
+  });
 
   setCached(cacheKey, responseBody);
 
