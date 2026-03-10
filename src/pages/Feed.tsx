@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Settings2, Calendar, Filter, MapPin, Compass, RefreshCw } from 'lucide-react';
@@ -80,6 +80,7 @@ export default function Feed() {
   const [hasMore, setHasMore] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const loadMoreInFlightRef = useRef(false);
 
   useEffect(() => {
     if (import.meta.env.DEV) {
@@ -258,6 +259,7 @@ export default function Feed() {
         setNotice('Unable to refresh events right now. Please try again.');
       }
     } finally {
+      loadMoreInFlightRef.current = false;
       setLoading(false);
       setExpandingSearch(false);
       setIsLoadingMore(false);
@@ -459,12 +461,8 @@ export default function Feed() {
   const visibleSuggested = sortedSuggested.filter(event => visibleEvents.includes(event));
 
   useEffect(() => {
-    setVisibleCount(60);
-  }, [orderedEvents.length]);
-
-  useEffect(() => {
     const handleScroll = () => {
-      if (loading || isLoadingMore) return;
+      if (loading || isLoadingMore || loadMoreInFlightRef.current) return;
       const scrollPosition = window.innerHeight + window.scrollY;
       const threshold = document.body.offsetHeight - 300;
       if (scrollPosition < threshold) return;
@@ -475,6 +473,7 @@ export default function Feed() {
       }
 
       if (hasMore) {
+        loadMoreInFlightRef.current = true;
         fetchEvents(page + 1);
       }
     };

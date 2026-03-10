@@ -1,4 +1,5 @@
 import { fetchAggregatedEvents, type AggregatedEvent } from '@/api/events/aggregate';
+import { supabase } from '@/integrations/supabase/client';
 
 type DateFilter = 'this_week' | 'next_week' | 'this_month' | 'this_year';
 
@@ -50,6 +51,11 @@ const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
   Rotterdam: { lat: 51.9244, lng: 4.4777 },
   Prague: { lat: 50.0755, lng: 14.4378 },
 };
+
+const MAX_FALLBACK_CITIES = 3;
+const UPSERT_COOLDOWN_SUCCESS_MS = 10 * 60 * 1000;
+const UPSERT_COOLDOWN_FAILURE_MS = 60 * 1000;
+const upsertCooldownByExternalId = new Map<string, number>();
 
 const resolveCoords = (city?: string, latitude?: number, longitude?: number) => {
   if (latitude != null && longitude != null) {
@@ -217,8 +223,28 @@ async function fetchExternalEvents(options: {
 
 export async function ensureSupabaseEvents(events: ExternalEvent[]) {
   if (events.length === 0) return events;
+  const now = Date.now();
+  const withExternalId = events.map(event => ({ ...event, externalId: event.externalId || event.id }));
+
+  const toUpsertByExternalId = new Map<string, ExternalEvent>();
+  for (const event of withExternalId) {
+    if (event.supabaseId) continue;
+    const externalId = event.externalId || event.id;
+    const cooldownUntil = upsertCooldownByExternalId.get(externalId) ?? 0;
+    if (cooldownUntil > now) continue;
+    if (!toUpsertByExternalId.has(externalId)) {
+      toUpsertByExternalId.set(externalId, event);
+    }
+  }
+
+  if (toUpsertByExternalId.size === 0) {
+    return withExternalId;
+  }
+
+  const toUpsert = Array.from(toUpsertByExternalId.values());
+
   try {
-    const payload = events.map(event => ({
+    const payload = toUpsert.map(event => ({
       external_id: event.externalId || event.id,
       source: event.source || 'external',
       name: event.name,
@@ -235,14 +261,18 @@ export async function ensureSupabaseEvents(events: ExternalEvent[]) {
       longitude: event.longitude ?? null,
     }));
 
-    const { data } = await (await import('@/integrations/supabase/client')).supabase
+    const { data } = await supabase
       .from('events')
       .upsert(payload, { onConflict: 'external_id' })
       .select('id, external_id');
 
+    for (const entry of payload) {
+      upsertCooldownByExternalId.set(entry.external_id, now + UPSERT_COOLDOWN_SUCCESS_MS);
+    }
+
     if (data) {
       const idByExternal = new Map(data.map(row => [row.external_id, row.id]));
-      return events.map(event => ({
+      return withExternalId.map(event => ({
         ...event,
         externalId: event.externalId || event.id,
         supabaseId: idByExternal.get(event.externalId || event.id) || event.supabaseId,
@@ -250,9 +280,13 @@ export async function ensureSupabaseEvents(events: ExternalEvent[]) {
       }));
     }
   } catch {
+    for (const event of toUpsert) {
+      const externalId = event.externalId || event.id;
+      upsertCooldownByExternalId.set(externalId, now + UPSERT_COOLDOWN_FAILURE_MS);
+    }
     // Ignore persistence failures and return events without supabase ids.
   }
-  return events.map(event => ({ ...event, externalId: event.externalId || event.id }));
+  return withExternalId;
 }
 
 export async function fetchEventsWithFallback(options: {
@@ -277,12 +311,13 @@ export async function fetchEventsWithFallback(options: {
   hasMore: boolean;
 }> {
   const baseRadius = options.radiusKm > 0 ? options.radiusKm : 25;
-  const radiusSteps = baseRadius >= 1500
-    ? [1500]
-    : Array.from(new Set([baseRadius, 50, 100])).filter(r => r > 0);
-
   const page = options.page ?? 0;
   const size = options.size ?? 60;
+  const radiusSteps = page > 0
+    ? [baseRadius]
+    : baseRadius >= 1500
+      ? [1500]
+      : Array.from(new Set([baseRadius, Math.max(baseRadius, 100)])).filter(r => r > 0);
 
   let response = {
     events: [] as ExternalEvent[],
@@ -309,8 +344,15 @@ export async function fetchEventsWithFallback(options: {
     if (response.events.length > 0 || page > 0) break;
   }
 
-  if (response.events.length === 0 && page === 0) {
-    for (const fallbackCity of PRIORITY_CITIES) {
+  const shouldTryFallbackCities =
+    response.events.length === 0 &&
+    page === 0 &&
+    options.city == null &&
+    options.latitude == null &&
+    options.longitude == null;
+
+  if (shouldTryFallbackCities) {
+    for (const fallbackCity of PRIORITY_CITIES.slice(0, MAX_FALLBACK_CITIES)) {
       response = await fetchExternalEvents({
         city: fallbackCity,
         latitude: options.latitude,

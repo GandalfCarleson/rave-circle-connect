@@ -45,7 +45,24 @@ const normalizeIsoParam = (value: string) => value.replace(/\.\d{3}Z$/, "Z");
 
 const formatDateParam = (value: string | null) => (value ? normalizeIsoParam(value) : null);
 
-const ELECTRONIC_KEYWORDS = [
+type AggregatedEvent = {
+  id: string;
+  source: "ticketmaster" | "tickster" | string;
+  sourceId: string;
+  title?: string | null;
+  description?: string | null;
+  startTime?: string | null;
+  venueName?: string | null;
+  city?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  genres?: string[] | null;
+};
+
+const ELECTRONIC_TERMS = [
+  "electronic",
+  "dance/electronic",
+  "club",
   "techno",
   "house",
   "trance",
@@ -54,48 +71,18 @@ const ELECTRONIC_KEYWORDS = [
   "dubstep",
   "hardstyle",
   "psytrance",
+  "edm",
   "rave",
-  "club",
   "dj",
-  "warehouse",
-  "electronic",
-  "dance",
 ];
 
-const NEGATIVE_KEYWORDS = [
-  "theatre",
-  "theater",
-  "musical",
-  "comedy",
-  "kids",
-  "family",
-  "opera",
-  "ballet",
-  "lecture",
-  "conference",
-  "seminar",
-  "workshop",
-  "orchestra",
-  "choir",
-  "film",
-];
-
-const scoreElectronic = (event: any) => {
-  const title = (event.title || "").toLowerCase();
-  const description = (event.description || "").toLowerCase();
-  const genres = Array.isArray(event.genres) ? event.genres.map((g: string) => g.toLowerCase()) : [];
-
-  let score = 0;
-  if (genres.some((g) => g.includes("dance/electronic") || g.includes("electronic") || g.includes("club"))) score += 5;
-  if (ELECTRONIC_KEYWORDS.some((k) => title.includes(k))) score += 4;
-  if (ELECTRONIC_KEYWORDS.some((k) => description.includes(k))) score += 2;
-  if (title.includes("dj") || title.includes("rave") || title.includes("club")) score += 2;
-  if (NEGATIVE_KEYWORDS.some((k) => title.includes(k))) score -= 6;
-  if (NEGATIVE_KEYWORDS.some((k) => description.includes(k))) score -= 3;
-  return score;
+const eventMatchesElectronic = (event: AggregatedEvent) => {
+  const text = `${event.title ?? ""} ${event.description ?? ""}`.toLowerCase();
+  const genres = Array.isArray(event.genres) ? event.genres.map((g) => g.toLowerCase()) : [];
+  return ELECTRONIC_TERMS.some((term) => text.includes(term) || genres.some((genre) => genre.includes(term)));
 };
 
-const parseLatLng = (lat: number, lng: number, event: any) => {
+const parseLatLng = (lat: number, lng: number, event: AggregatedEvent) => {
   if (event.lat == null || event.lng == null) return null;
   const R = 6371;
   const dLat = (event.lat - lat) * Math.PI / 180;
@@ -108,8 +95,8 @@ const parseLatLng = (lat: number, lng: number, event: any) => {
   return R * c;
 };
 
-const dedupeEvents = (events: any[]) => {
-  const seen = new Map<string, any>();
+const dedupeEvents = (events: AggregatedEvent[]) => {
+  const seen = new Map<string, AggregatedEvent>();
 
   for (const event of events) {
     const key = `${event.source}:${event.sourceId}`;
@@ -120,7 +107,7 @@ const dedupeEvents = (events: any[]) => {
   }
 
   const values = Array.from(seen.values());
-  const final: any[] = [];
+  const final: AggregatedEvent[] = [];
 
   for (const event of values) {
     const titleKey = (event.title || "").toLowerCase();
@@ -147,7 +134,7 @@ const dedupeEvents = (events: any[]) => {
 
 type ProviderResult = {
   ok: boolean;
-  events: any[];
+  events: AggregatedEvent[];
   totalPages?: number;
   totalElements?: number;
   error?: string;
@@ -192,7 +179,8 @@ const fetchProvider = async (
       const response = await fetchWithTimeout(url.toString(), headers);
       if (response.ok) {
         const payload = await response.json();
-        const events = Array.isArray(payload?.events) ? payload.events : [];
+        const parsedEvents = Array.isArray(payload?.events) ? payload.events : [];
+        const events = parsedEvents as AggregatedEvent[];
         return {
           ok: true,
           events,
@@ -260,8 +248,11 @@ serve(async (req) => {
   const radiusKm = radiusKmParam ? Number(radiusKmParam) : null;
   const size = Math.min(toNumber(url.searchParams.get("size"), 60), 100);
   const page = Math.max(0, toNumber(url.searchParams.get("page"), 0));
-  const electronicOnly = false;
-  const selectedGenres: string[] = [];
+  const electronicOnly = url.searchParams.get("electronicOnly") === "true";
+  const selectedGenres = (url.searchParams.get("genres") || "")
+    .split(",")
+    .map((genre) => genre.trim().toLowerCase())
+    .filter(Boolean);
   const startDateTime = formatDateParam(url.searchParams.get("startDateTime"));
   const endDateTime = formatDateParam(url.searchParams.get("endDateTime"));
 
@@ -306,7 +297,7 @@ serve(async (req) => {
   ticksterUrl.searchParams.set("size", String(Math.min(size, 100)));
 
   let extraPage = 0;
-  let merged: any[] = [];
+  let merged: AggregatedEvent[] = [];
   let tmMeta = { totalPages: 0, totalElements: 0, ok: false, error: "", count: 0 };
   let tkMeta = { totalPages: 0, totalElements: 0, ok: false, error: "", count: 0 };
 
@@ -366,11 +357,14 @@ serve(async (req) => {
   let deduped = dedupeEvents(merged);
 
   if (selectedGenres.length > 0) {
-    // Filters disabled for now; keep all events.
+    deduped = deduped.filter((event) => {
+      const genres = Array.isArray(event.genres) ? event.genres.map((genre) => genre.toLowerCase()) : [];
+      return genres.some((genre) => selectedGenres.some((selected) => genre.includes(selected)));
+    });
   }
 
   if (electronicOnly) {
-    // Filters disabled for now; keep all events.
+    deduped = deduped.filter(eventMatchesElectronic);
   }
 
   if (radiusKm != null) {

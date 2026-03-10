@@ -24,7 +24,40 @@ const pickBestImage = (images: Array<{ ratio?: string; url?: string; width?: num
   return target.sort((a, b) => (b.width || 0) - (a.width || 0))[0]?.url ?? null;
 };
 
-const collectGenres = (classifications: Array<Record<string, any>> | undefined) => {
+type Classification = Record<string, { name?: string } | undefined> & {
+  segment?: { name?: string };
+  genre?: { name?: string };
+  subGenre?: { name?: string };
+  type?: { name?: string };
+  subType?: { name?: string };
+};
+
+type TicketmasterEvent = {
+  id: string;
+  name?: string;
+  info?: string;
+  pleaseNote?: string;
+  url?: string;
+  images?: Array<{ url?: string; ratio?: string; width?: number }>;
+  classifications?: Classification[];
+  priceRanges?: Array<{ min?: number; currency?: string }>;
+  dates?: {
+    start?: { dateTime?: string; localDate?: string };
+    end?: { dateTime?: string };
+    timezone?: string;
+  };
+  _embedded?: {
+    venues?: Array<{
+      name?: string;
+      city?: { name?: string };
+      country?: { countryCode?: string };
+      address?: { line1?: string };
+      location?: { latitude?: string; longitude?: string };
+    }>;
+  };
+};
+
+const collectGenres = (classifications: Classification[] | undefined) => {
   if (!classifications) return [];
   const names = new Set<string>();
   classifications.forEach((item) => {
@@ -130,7 +163,7 @@ serve(async (req) => {
   const data = await response.json();
   const events = data?._embedded?.events ?? [];
 
-  const normalized = events.map((event: any) => {
+  const normalized = (events as TicketmasterEvent[]).map((event) => {
     const venue = event?._embedded?.venues?.[0];
     const location = venue?.location;
     const imageUrl = pickBestImage(event.images);

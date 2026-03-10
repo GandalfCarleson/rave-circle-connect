@@ -1,3 +1,5 @@
+import { supabase } from '@/integrations/supabase/client';
+
 export type AggregatedEvent = {
   id: string;
   source: string;
@@ -104,4 +106,3 @@ export async function fetchAggregatedEvents(params: AggregateQuery): Promise<Agg
 
   return payload as AggregatedEventsResponse;
 }
-import { supabase } from '@/integrations/supabase/client';

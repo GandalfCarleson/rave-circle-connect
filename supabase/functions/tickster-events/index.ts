@@ -14,6 +14,8 @@ const jsonResponse = (body: unknown, status = 200) =>
 type CacheEntry = { expiresAt: number; payload: unknown };
 const cache = new Map<string, CacheEntry>();
 const CACHE_TTL_MS = 10 * 60 * 1000;
+const PROVIDER_TIMEOUT_MS = 7000;
+const MAX_RETRIES = 2;
 
 const getCached = (key: string) => {
   const entry = cache.get(key);
@@ -74,6 +76,55 @@ const toNumberOrNull = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+type JsonRecord = Record<string, unknown>;
+
+const jitter = () => Math.floor(Math.random() * 200);
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const fetchWithTimeout = async (url: string, headers: HeadersInit) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PROVIDER_TIMEOUT_MS);
+  try {
+    return await fetch(url, { headers, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+const fetchWithRetry = async (url: string, headers: HeadersInit) => {
+  let attempt = 0;
+  let lastResponse: Response | null = null;
+  let lastError: unknown = null;
+
+  while (attempt <= MAX_RETRIES) {
+    try {
+      const response = await fetchWithTimeout(url, headers);
+      if (response.ok) return response;
+
+      const retryable = response.status === 429 || response.status >= 500;
+      lastResponse = response;
+      if (!retryable || attempt === MAX_RETRIES) return response;
+    } catch (error) {
+      lastError = error;
+      if (attempt === MAX_RETRIES) {
+        throw error;
+      }
+    }
+
+    attempt += 1;
+    await delay(250 * Math.pow(2, attempt) + jitter());
+  }
+
+  if (lastResponse) return lastResponse;
+  throw lastError instanceof Error ? lastError : new Error("Tickster request failed");
+};
+
+const asRecord = (value: unknown): JsonRecord | null =>
+  value && typeof value === "object" ? (value as JsonRecord) : null;
+
+const asRecordArray = (value: unknown): JsonRecord[] =>
+  Array.isArray(value) ? value.filter((item): item is JsonRecord => Boolean(asRecord(item))) : [];
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -112,11 +163,24 @@ serve(async (req) => {
     return jsonResponse(cached);
   }
 
-  const response = await fetch(ticksterUrl.toString(), {
-    headers: {
+  let response: Response;
+  try {
+    response = await fetchWithRetry(ticksterUrl.toString(), {
       "X-API-KEY": apiKey,
-    },
-  });
+    });
+  } catch (error) {
+    return jsonResponse(
+      {
+        error: {
+          status: 504,
+          message: "Tickster request failed",
+          details: error instanceof Error ? error.message : "Unknown error",
+          request: ticksterUrl.toString().replace(apiKey, "[redacted]"),
+        },
+      },
+      504,
+    );
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -136,61 +200,94 @@ serve(async (req) => {
   const rateLimit = response.headers.get("X-RATELIMIT-LIMIT");
   const rateRemaining = response.headers.get("X-RATELIMIT-REMAINING");
 
-  const payload = await response.json();
-  const items = Array.isArray(payload?.items)
-    ? payload.items
-    : Array.isArray(payload?.hits)
-      ? payload.hits
-    : Array.isArray(payload?.events)
-      ? payload.events
-      : Array.isArray(payload?.data?.events)
-        ? payload.data.events
-        : Array.isArray(payload?.results)
-          ? payload.results
-          : Array.isArray(payload)
-            ? payload
-            : [];
-  const total = payload?.total ?? payload?.totalCount ?? payload?.totalHits ?? items.length;
+  const payload = await response.json() as JsonRecord | JsonRecord[];
+  const payloadRecord = asRecord(payload);
+  const nestedData = asRecord(payloadRecord?.data);
+  const items = asRecordArray(payloadRecord?.items)
+    .concat(asRecordArray(payloadRecord?.hits))
+    .concat(asRecordArray(payloadRecord?.events))
+    .concat(asRecordArray(nestedData?.events))
+    .concat(asRecordArray(payloadRecord?.results));
+  const fallbackItems = items.length > 0 ? items : asRecordArray(payload);
+  const totalRaw = payloadRecord?.total ?? payloadRecord?.totalCount ?? payloadRecord?.totalHits;
+  const total = typeof totalRaw === "number" ? totalRaw : fallbackItems.length;
 
-  const normalized = items.map((event: any) => ({
-    id: `tickster_${event.id}`,
+  const normalized = fallbackItems.map((event) => {
+    const venue = asRecord(event.venue);
+    const location = asRecord(event.location);
+    const place = asRecord(event.place);
+    const dateInfo = asRecord(event.date);
+    const timeInfo = asRecord(event.time);
+    const priceInfo = asRecord(event.price);
+    const links = asRecord(event.links);
+    const venueCity = asRecord(venue?.city);
+    const locationCity = asRecord(location?.city);
+
+    const tags = Array.isArray(event.tags) ? event.tags : [];
+    const genres = tags
+      .map((tag) => {
+        if (typeof tag === "string") return tag;
+        const tagRecord = asRecord(tag);
+        return typeof tagRecord?.name === "string" ? tagRecord.name : "";
+      })
+      .filter((tag): tag is string => tag.length > 0);
+
+    return {
+      id: `tickster_${String(event.id ?? "")}`,
     source: "tickster",
-    sourceId: String(event.id),
-    title: event.name || event.title || "",
-    description: event.description || event.text || "",
+    sourceId: String(event.id ?? ""),
+    title: (typeof event.name === "string" ? event.name : undefined) || (typeof event.title === "string" ? event.title : "") || "",
+    description: (typeof event.description === "string" ? event.description : undefined) || (typeof event.text === "string" ? event.text : "") || "",
     startTime: toIso(pickFirst(
-      event.start,
-      event.startDate,
-      event.startTime,
-      event.start_datetime,
-      event.date?.start,
-      event.date?.from,
-      event.time?.start,
+      typeof event.start === "string" ? event.start : undefined,
+      typeof event.startDate === "string" ? event.startDate : undefined,
+      typeof event.startTime === "string" ? event.startTime : undefined,
+      typeof event.start_datetime === "string" ? event.start_datetime : undefined,
+      typeof dateInfo?.start === "string" ? dateInfo.start : undefined,
+      typeof dateInfo?.from === "string" ? dateInfo.from : undefined,
+      typeof timeInfo?.start === "string" ? timeInfo.start : undefined,
     )),
     endTime: toIso(pickFirst(
-      event.end,
-      event.endDate,
-      event.endTime,
-      event.end_datetime,
-      event.date?.end,
-      event.date?.to,
-      event.time?.end,
+      typeof event.end === "string" ? event.end : undefined,
+      typeof event.endDate === "string" ? event.endDate : undefined,
+      typeof event.endTime === "string" ? event.endTime : undefined,
+      typeof event.end_datetime === "string" ? event.end_datetime : undefined,
+      typeof dateInfo?.end === "string" ? dateInfo.end : undefined,
+      typeof dateInfo?.to === "string" ? dateInfo.to : undefined,
+      typeof timeInfo?.end === "string" ? timeInfo.end : undefined,
     )),
-    timezone: event.timezone || null,
-    venueName: event.venue?.name || event.location?.name || event.place?.name || null,
-    city: event.venue?.city?.name || event.venue?.city || event.location?.city?.name || event.location?.city || event.place?.city || null,
-    country: event.venue?.countryCode || event.location?.countryCode || event.place?.countryCode || null,
-    address: event.venue?.address?.line1 || event.venue?.address || event.location?.address || event.place?.address || null,
-    lat: toNumberOrNull(event.venue?.latitude ?? event.location?.latitude ?? event.place?.latitude),
-    lng: toNumberOrNull(event.venue?.longitude ?? event.location?.longitude ?? event.place?.longitude),
-    imageUrl: normalizeImageFromAny(event.images || event.imageUrls || event.media?.images),
-    ticketUrl: event.shopUri || event.infoUri || event.url || event.links?.shop || null,
-    priceFrom: toNumberOrNull(event.minPrice ?? event.price?.from),
-    currency: event.currency || event.price?.currency || null,
-    genres: Array.isArray(event.tags)
-      ? event.tags.map((tag: any) => typeof tag === "string" ? tag : (tag?.name || "")).filter(Boolean)
-      : [],
-  }));
+    timezone: typeof event.timezone === "string" ? event.timezone : null,
+    venueName: (typeof venue?.name === "string" ? venue.name : undefined) || (typeof location?.name === "string" ? location.name : undefined) || (typeof place?.name === "string" ? place.name : undefined) || null,
+    city: (typeof venueCity?.name === "string" ? venueCity.name : undefined)
+      || (typeof venue?.city === "string" ? venue.city : undefined)
+      || (typeof locationCity?.name === "string" ? locationCity.name : undefined)
+      || (typeof location?.city === "string" ? location.city : undefined)
+      || (typeof place?.city === "string" ? place.city : undefined)
+      || null,
+    country: (typeof venue?.countryCode === "string" ? venue.countryCode : undefined)
+      || (typeof location?.countryCode === "string" ? location.countryCode : undefined)
+      || (typeof place?.countryCode === "string" ? place.countryCode : undefined)
+      || null,
+    address: (asRecord(venue?.address)?.line1 as string | undefined)
+      || (typeof venue?.address === "string" ? venue.address : undefined)
+      || (typeof location?.address === "string" ? location.address : undefined)
+      || (typeof place?.address === "string" ? place.address : undefined)
+      || null,
+    lat: toNumberOrNull(venue?.latitude ?? location?.latitude ?? place?.latitude),
+    lng: toNumberOrNull(venue?.longitude ?? location?.longitude ?? place?.longitude),
+    imageUrl: normalizeImageFromAny(event.images || event.imageUrls || asRecord(event.media)?.images),
+    ticketUrl: (typeof event.shopUri === "string" ? event.shopUri : undefined)
+      || (typeof event.infoUri === "string" ? event.infoUri : undefined)
+      || (typeof event.url === "string" ? event.url : undefined)
+      || (typeof links?.shop === "string" ? links.shop : undefined)
+      || null,
+    priceFrom: toNumberOrNull(event.minPrice ?? priceInfo?.from),
+    currency: (typeof event.currency === "string" ? event.currency : undefined)
+      || (typeof priceInfo?.currency === "string" ? priceInfo.currency : undefined)
+      || null,
+    genres,
+  };
+  });
 
   const responseBody = {
     events: normalized,
@@ -204,6 +301,13 @@ serve(async (req) => {
   };
 
   setCached(cacheKey, responseBody);
+
+  console.log("tickster-events", {
+    page,
+    size,
+    events: normalized.length,
+    rateRemaining: rateRemaining ?? "unknown",
+  });
 
   return jsonResponse(responseBody);
 });

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, memo } from 'react';
+import { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Compass, Users, Calendar, TrendingUp, RefreshCw } from 'lucide-react';
@@ -52,12 +52,13 @@ export default function Discover() {
   const [profile, setProfile] = useState<Profile>({ city: null, radius_km: 100, latitude: null, longitude: null });
   const [preferredGenres, setPreferredGenres] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [visibleCount, setVisibleCount] = useState(12);
+  const [visibleCount, setVisibleCount] = useState(60);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const loadMoreInFlightRef = useRef(false);
 
   useEffect(() => {
     if (import.meta.env.DEV) {
@@ -161,7 +162,7 @@ export default function Discover() {
         setVisibleCount(prev => prev + combined.length);
       } else {
         setRecommendedEvents(combined);
-        setVisibleCount(12);
+        setVisibleCount(60);
         setNotice(nextNotice ?? null);
       }
       setPage(nextPage);
@@ -170,6 +171,8 @@ export default function Discover() {
       if (import.meta.env.DEV) {
         console.error('[discover] fetch error', error);
       }
+    } finally {
+      loadMoreInFlightRef.current = false;
     }
   }, []);
 
@@ -296,22 +299,19 @@ export default function Discover() {
   const visibleEvents = sortedEvents.slice(0, visibleCount);
 
   useEffect(() => {
-    setVisibleCount(12);
-  }, [sortedEvents.length]);
-
-  useEffect(() => {
     const handleScroll = () => {
-      if (loading || isLoadingMore) return;
+      if (loading || isLoadingMore || loadMoreInFlightRef.current) return;
       const scrollPosition = window.innerHeight + window.scrollY;
       const threshold = document.body.offsetHeight - 300;
       if (scrollPosition < threshold) return;
 
       if (visibleCount < sortedEvents.length) {
-        setVisibleCount((prev) => Math.min(prev + 12, sortedEvents.length));
+        setVisibleCount((prev) => Math.min(prev + 20, sortedEvents.length));
         return;
       }
 
       if (hasMore) {
+        loadMoreInFlightRef.current = true;
         setIsLoadingMore(true);
         fetchRecommendedEvents(page + 1, profile, preferredGenres, true)
           .finally(() => setIsLoadingMore(false));
