@@ -76,10 +76,84 @@ const ELECTRONIC_TERMS = [
   "dj",
 ];
 
+const MUSIC_TERMS = [
+  "music",
+  "concert",
+  "live",
+  "festival",
+  "gig",
+  "dj",
+  "club",
+  "rave",
+  "dance",
+  "electronic",
+  "house",
+  "techno",
+  "trance",
+  "dnb",
+  "drum and bass",
+  "hip-hop",
+  "hip hop",
+  "rap",
+  "rock",
+  "pop",
+  "jazz",
+  "metal",
+  "indie",
+  "edm",
+  "showcase",
+];
+
+const NON_MUSIC_TERMS = [
+  "stand up",
+  "stand-up",
+  "comedy",
+  "gift card",
+  "giftcard",
+  "presentkort",
+  "voucher",
+  "parking permit",
+  "theatre",
+  "theater",
+  "musical",
+  "opera",
+  "ballet",
+  "lecture",
+  "workshop",
+  "seminar",
+  "conference",
+  "cinema",
+  "movie",
+  "film screening",
+];
+
+const includesAnyTerm = (haystack: string, terms: string[]) =>
+  terms.some((term) => haystack.includes(term));
+
 const eventMatchesElectronic = (event: AggregatedEvent) => {
   const text = `${event.title ?? ""} ${event.description ?? ""}`.toLowerCase();
   const genres = Array.isArray(event.genres) ? event.genres.map((g) => g.toLowerCase()) : [];
   return ELECTRONIC_TERMS.some((term) => text.includes(term) || genres.some((genre) => genre.includes(term)));
+};
+
+const eventMatchesMusic = (event: AggregatedEvent) => {
+  const text = `${event.title ?? ""} ${event.description ?? ""} ${event.venueName ?? ""} ${event.city ?? ""}`.toLowerCase();
+  const genres = Array.isArray(event.genres) ? event.genres.map((g) => g.toLowerCase()) : [];
+  const genresText = genres.join(" ");
+
+  if (includesAnyTerm(`${text} ${genresText}`, NON_MUSIC_TERMS)) {
+    return false;
+  }
+
+  if (includesAnyTerm(genresText, MUSIC_TERMS)) {
+    return true;
+  }
+
+  if (includesAnyTerm(text, MUSIC_TERMS)) {
+    return true;
+  }
+
+  return false;
 };
 
 const parseLatLng = (lat: number, lng: number, event: AggregatedEvent) => {
@@ -355,6 +429,8 @@ serve(async (req) => {
   }
 
   let deduped = dedupeEvents(merged);
+  const beforeMusicFilter = deduped.length;
+  deduped = deduped.filter(eventMatchesMusic);
 
   if (selectedGenres.length > 0) {
     deduped = deduped.filter((event) => {
@@ -435,6 +511,7 @@ serve(async (req) => {
   console.log("events-aggregate", {
     page,
     size,
+    beforeMusicFilter,
     returned: pageEvents.length,
     ticketmaster: { ok: tmMeta.ok, count: tmMeta.count },
     tickster: { ok: tkMeta.ok, count: tkMeta.count },
