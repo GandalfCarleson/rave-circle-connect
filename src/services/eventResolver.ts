@@ -17,6 +17,7 @@ type EventRow = {
   latitude: number | null;
   longitude: number | null;
   min_price: number | null;
+  ticket_url: string | null;
   image_url: string | null;
   event_type: string | null;
   genres: string[] | null;
@@ -35,6 +36,7 @@ const toExternalEvent = (row: EventRow): ExternalEvent => ({
   latitude: row.latitude ?? undefined,
   longitude: row.longitude ?? undefined,
   minPrice: row.min_price ?? undefined,
+  ticketUrl: row.ticket_url ?? undefined,
   imageUrl: row.image_url ?? undefined,
   eventType: row.event_type ?? undefined,
   genres: row.genres ?? undefined,
@@ -56,7 +58,7 @@ export async function resolveEventsBySupabaseIds(ids: string[]) {
   if (missing.length > 0) {
     const { data } = await supabase
       .from('events')
-      .select('id, external_id, source, name, description, city, venue_name, start_datetime, end_datetime, latitude, longitude, min_price, image_url, event_type, genres')
+      .select('id, external_id, source, name, description, city, venue_name, start_datetime, end_datetime, latitude, longitude, min_price, ticket_url, image_url, event_type, genres')
       .in('id', missing);
 
     (data || []).forEach((row) => {
@@ -76,7 +78,7 @@ export async function resolveEventsByExternalIds(ids: string[]) {
   if (missing.length > 0) {
     const { data } = await supabase
       .from('events')
-      .select('id, external_id, source, name, description, city, venue_name, start_datetime, end_datetime, latitude, longitude, min_price, image_url, event_type, genres')
+      .select('id, external_id, source, name, description, city, venue_name, start_datetime, end_datetime, latitude, longitude, min_price, ticket_url, image_url, event_type, genres')
       .in('external_id', missing);
 
     (data || []).forEach((row) => {

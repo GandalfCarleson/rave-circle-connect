@@ -14,6 +14,7 @@ type EventRow = {
   latitude: number | null;
   longitude: number | null;
   min_price: number | null;
+  ticket_url: string | null;
   image_url: string | null;
   event_type: string | null;
   genres: string[] | null;
@@ -94,7 +95,7 @@ export async function getCrewPinnedEvents(crewId: string, requiredPins: number) 
 
   const { data } = await supabase
     .from('events')
-    .select('id, external_id, name, description, city, venue_name, start_datetime, end_datetime, latitude, longitude, min_price, image_url, event_type, genres, source')
+    .select('id, external_id, name, description, city, venue_name, start_datetime, end_datetime, latitude, longitude, min_price, ticket_url, image_url, event_type, genres, source')
     .in('id', eligibleIds);
 
   if (!data) return [];
@@ -114,6 +115,7 @@ export async function getCrewPinnedEvents(crewId: string, requiredPins: number) 
         latitude: event.latitude ?? undefined,
         longitude: event.longitude ?? undefined,
         minPrice: event.min_price ?? undefined,
+        ticketUrl: event.ticket_url ?? undefined,
         imageUrl: event.image_url ?? undefined,
         eventType: event.event_type ?? undefined,
         genres: event.genres ?? undefined,
@@ -137,4 +139,3 @@ export async function removeCrewEventFromCrew(crewId: string, eventId: string) {
     .eq('crew_id', crewId)
     .eq('event_id', eventId);
 }
-

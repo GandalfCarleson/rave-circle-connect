@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, MapPin, Calendar, Ticket, Users, Check, Heart, CalendarPlus, Send } from 'lucide-react';
 import { format } from 'date-fns';
@@ -31,14 +31,20 @@ interface Event {
 }
 
 type EventStatus = 'going' | 'interested' | 'ignored' | null;
+type EventDetailLocationState = {
+  eventPreview?: Event;
+};
 
 export default function EventDetail() {
   const { id } = useParams<{ id: string }>();
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
-  const [event, setEvent] = useState<Event | null>(null);
-  const [loading, setLoading] = useState(true);
+  const previewEvent = (location.state as EventDetailLocationState | null)?.eventPreview;
+  const hasValidPreview = Boolean(previewEvent && id && previewEvent.id === id);
+  const [event, setEvent] = useState<Event | null>(hasValidPreview ? previewEvent ?? null : null);
+  const [loading, setLoading] = useState(!hasValidPreview);
   const [status, setStatus] = useState<EventStatus>(null);
   const [goingCount, setGoingCount] = useState(0);
   const [shareModalOpen, setShareModalOpen] = useState(false);
@@ -59,7 +65,18 @@ export default function EventDetail() {
       .eq('id', id)
       .single();
     
-    if (data) setEvent(data);
+    if (data) {
+      const dbEvent = data as Event;
+      setEvent((prev) => ({
+        ...dbEvent,
+        description: dbEvent.description ?? prev?.description ?? null,
+        end_datetime: dbEvent.end_datetime ?? prev?.end_datetime ?? null,
+        min_price: dbEvent.min_price ?? prev?.min_price ?? null,
+        ticket_url: dbEvent.ticket_url ?? prev?.ticket_url ?? null,
+        image_url: dbEvent.image_url ?? prev?.image_url ?? null,
+        genres: dbEvent.genres?.length ? dbEvent.genres : (prev?.genres ?? []),
+      }));
+    }
     setLoading(false);
   }, [id]);
 
@@ -144,23 +161,56 @@ export default function EventDetail() {
   const updateStatus = async (newStatus: 'going' | 'interested') => {
     if (!user || !id) return;
 
+    const isTogglingOff = status === newStatus;
+    if (isTogglingOff) {
+      const { error } = await supabase
+        .from('user_event_statuses')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('event_id', id);
+
+      if (!error) {
+        setStatus(null);
+        toast({
+          title: newStatus === 'going' ? 'Going removed' : 'Interest removed',
+          description: newStatus === 'going'
+            ? "You won't be counted as going."
+            : 'Event removed from your interests.',
+        });
+        fetchGoingCount();
+      } else {
+        toast({
+          title: 'Could not update',
+          description: error.message,
+          variant: 'destructive',
+        });
+      }
+      return;
+    }
+
     const { error } = await supabase
       .from('user_event_statuses')
       .upsert({
         user_id: user.id,
         event_id: id,
         status: newStatus,
-      });
+      }, { onConflict: 'user_id,event_id' });
 
     if (!error) {
       setStatus(newStatus);
       toast({
-        title: newStatus === 'going' ? "You're going!" : "Marked as interested",
-        description: newStatus === 'going' 
-          ? 'See you there!' 
+        title: newStatus === 'going' ? "You're going!" : 'Marked as interested',
+        description: newStatus === 'going'
+          ? 'See you there!'
           : "We'll remind you about this event",
       });
       fetchGoingCount();
+    } else {
+      toast({
+        title: 'Could not update',
+        description: error.message,
+        variant: 'destructive',
+      });
     }
   };
 

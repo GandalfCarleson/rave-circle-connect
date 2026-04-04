@@ -348,7 +348,24 @@ export default function Feed() {
       });
       return;
     }
-    navigate(`/events/${ready.supabaseId}`);
+    navigate(`/events/${ready.supabaseId}`, {
+      state: {
+        eventPreview: {
+          id: ready.supabaseId,
+          name: ready.name,
+          description: ready.description ?? null,
+          venue_name: ready.venueName ?? null,
+          city: ready.city ?? null,
+          start_datetime: ready.startDateTime,
+          end_datetime: ready.endDateTime ?? null,
+          min_price: ready.minPrice ?? null,
+          ticket_url: ready.ticketUrl ?? null,
+          image_url: ready.imageUrl ?? null,
+          event_type: ready.eventType ?? null,
+          genres: ready.genres ?? [],
+        },
+      },
+    });
   };
 
   const fetchUserGroups = useCallback(async () => {
@@ -565,7 +582,7 @@ export default function Feed() {
         user_id: user.id,
         event_id: ready.supabaseId,
         status: 'interested',
-      });
+      }, { onConflict: 'user_id,event_id' });
     if (error) {
       const reverted = new Set(next);
       reverted.delete(ready.supabaseId);

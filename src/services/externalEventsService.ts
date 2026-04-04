@@ -16,6 +16,7 @@ export type ExternalEvent = {
   latitude?: number;
   longitude?: number;
   minPrice?: number;
+  ticketUrl?: string;
   imageUrl?: string;
   eventType?: string;
   genres?: string[];
@@ -147,6 +148,7 @@ const toExternalEvent = (event: AggregatedEvent): ExternalEvent | null => {
     latitude: event.lat ?? undefined,
     longitude: event.lng ?? undefined,
     minPrice: event.priceFrom ?? undefined,
+    ticketUrl: event.ticketUrl ?? undefined,
     imageUrl: event.imageUrl ?? undefined,
     eventType: inferEventType(event),
     genres: event.genres || [],
@@ -268,6 +270,7 @@ export async function ensureSupabaseEvents(events: ExternalEvent[]) {
       start_datetime: event.startDateTime,
       end_datetime: event.endDateTime ?? null,
       min_price: event.minPrice ?? null,
+      ticket_url: event.ticketUrl ?? null,
       image_url: event.imageUrl ?? null,
       event_type: (event.eventType || null) as ExternalEvent['eventType'],
       genres: event.genres ?? [],
