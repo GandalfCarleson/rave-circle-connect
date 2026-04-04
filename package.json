@@ -9,7 +9,7 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "deploy:functions": "supabase functions deploy delete-account --no-verify-jwt && supabase functions deploy cleanup-retracted-messages --no-verify-jwt"
+    "deploy:functions": "supabase functions deploy delete-account --no-verify-jwt && supabase functions deploy cleanup-retracted-messages --no-verify-jwt && supabase functions deploy tickster-events --no-verify-jwt && supabase functions deploy ticketmaster-events --no-verify-jwt && supabase functions deploy events-aggregate"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

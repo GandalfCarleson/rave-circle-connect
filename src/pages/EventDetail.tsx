@@ -279,10 +279,10 @@ END:VCALENDAR`;
           </div>
 
           {/* Price */}
-          {event.min_price && (
+          {event.min_price != null && (
             <div className="flex items-center gap-2 text-secondary font-medium mb-4">
               <Ticket className="w-4 h-4" />
-              <span>From {event.min_price} kr</span>
+              <span>{event.min_price === 0 ? 'Free' : `From ${event.min_price} kr`}</span>
             </div>
           )}
 

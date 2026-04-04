@@ -242,9 +242,23 @@ export async function ensureSupabaseEvents(events: ExternalEvent[]) {
   }
 
   const toUpsert = Array.from(toUpsertByExternalId.values());
+  const externalIds = toUpsert.map(event => event.externalId || event.id);
+  const idByExternal = new Map<string, string>();
+
+  // Resolve already-known events first so action buttons can work even if inserts are blocked.
+  const { data: existingRows } = await supabase
+    .from('events')
+    .select('id, external_id')
+    .in('external_id', externalIds);
+  (existingRows || []).forEach((row) => {
+    if (row.external_id) {
+      idByExternal.set(row.external_id, row.id);
+    }
+  });
 
   try {
-    const payload = toUpsert.map(event => ({
+    const payload = toUpsert
+      .map(event => ({
       external_id: event.externalId || event.id,
       source: event.source || 'external',
       name: event.name,
@@ -259,34 +273,55 @@ export async function ensureSupabaseEvents(events: ExternalEvent[]) {
       genres: event.genres ?? [],
       latitude: event.latitude ?? null,
       longitude: event.longitude ?? null,
+      }))
+      .filter((entry) => !idByExternal.has(entry.external_id));
+
+    if (payload.length > 0) {
+      // ignoreDuplicates avoids UPDATE paths that can fail under stricter RLS.
+      const { error: upsertError } = await supabase
+        .from('events')
+        .upsert(payload, { onConflict: 'external_id', ignoreDuplicates: true });
+      if (upsertError) {
+        throw upsertError;
+      }
+
+      for (const entry of payload) {
+        upsertCooldownByExternalId.set(entry.external_id, now + UPSERT_COOLDOWN_SUCCESS_MS);
+      }
+
+      const insertedExternalIds = payload.map(entry => entry.external_id);
+      const { data: insertedRows } = await supabase
+        .from('events')
+        .select('id, external_id')
+        .in('external_id', insertedExternalIds);
+      (insertedRows || []).forEach((row) => {
+        if (row.external_id) {
+          idByExternal.set(row.external_id, row.id);
+        }
+      });
+    }
+
+    return withExternalId.map(event => ({
+      ...event,
+      externalId: event.externalId || event.id,
+      supabaseId: idByExternal.get(event.externalId || event.id) || event.supabaseId,
+      source: event.source || 'external',
     }));
-
-    const { data } = await supabase
-      .from('events')
-      .upsert(payload, { onConflict: 'external_id' })
-      .select('id, external_id');
-
-    for (const entry of payload) {
-      upsertCooldownByExternalId.set(entry.external_id, now + UPSERT_COOLDOWN_SUCCESS_MS);
-    }
-
-    if (data) {
-      const idByExternal = new Map(data.map(row => [row.external_id, row.id]));
-      return withExternalId.map(event => ({
-        ...event,
-        externalId: event.externalId || event.id,
-        supabaseId: idByExternal.get(event.externalId || event.id) || event.supabaseId,
-        source: event.source || 'external',
-      }));
-    }
-  } catch {
-    for (const event of toUpsert) {
+  } catch (error) {
+    for (const event of toUpsert.filter(item => !idByExternal.has(item.externalId || item.id))) {
       const externalId = event.externalId || event.id;
       upsertCooldownByExternalId.set(externalId, now + UPSERT_COOLDOWN_FAILURE_MS);
     }
-    // Ignore persistence failures and return events without supabase ids.
+    if (import.meta.env.DEV) {
+      console.warn('[events] failed to persist external events', error);
+    }
   }
-  return withExternalId;
+  return withExternalId.map(event => ({
+    ...event,
+    externalId: event.externalId || event.id,
+    supabaseId: idByExternal.get(event.externalId || event.id) || event.supabaseId,
+    source: event.source || 'external',
+  }));
 }
 
 export async function fetchEventsWithFallback(options: {

@@ -103,7 +103,12 @@ export default function Discover() {
     setLoadingTrending(false);
   }, []);
 
-  const fetchRecommendedEvents = useCallback(async (pageToLoad: number, profileSnapshot: Profile, preferencesSnapshot: string[], append: boolean) => {
+  const fetchRecommendedEvents = useCallback(async (
+    pageToLoad: number,
+    profileSnapshot: Profile,
+    preferencesSnapshot: string[],
+    append: boolean,
+  ): Promise<string | null> => {
     if (import.meta.env.DEV) {
       console.debug('[discover] fetch start', { page: pageToLoad });
     }
@@ -167,16 +172,22 @@ export default function Discover() {
       }
       setPage(nextPage);
       setHasMore(nextHasMore);
+      return append ? null : (nextNotice ?? null);
     } catch (error) {
       if (import.meta.env.DEV) {
         console.error('[discover] fetch error', error);
       }
+      const fallbackNotice = 'Unable to refresh events right now. Please try again.';
+      if (!append) {
+        setNotice(fallbackNotice);
+      }
+      return append ? null : fallbackNotice;
     } finally {
       loadMoreInFlightRef.current = false;
     }
   }, []);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (): Promise<string | null> => {
     setLoading(true);
     setLoadingTrending(true);
     setIsRefreshing(true);
@@ -254,21 +265,22 @@ export default function Discover() {
         setOpenGroups(groupsWithCounts);
       }
 
-      await fetchRecommendedEvents(0, currentProfile, currentPreferences, false);
+      const refreshedNotice = await fetchRecommendedEvents(0, currentProfile, currentPreferences, false);
 
       await fetchTrendingEvents();
       setLoading(false);
+      return refreshedNotice;
     } finally {
       setIsRefreshing(false);
     }
   }, [fetchRecommendedEvents, fetchTrendingEvents, user]);
 
   const handleRefresh = useCallback(async () => {
-    await fetchData();
-    if (notice) {
-      toast({ title: notice });
+    const refreshedNotice = await fetchData();
+    if (refreshedNotice) {
+      toast({ title: refreshedNotice });
     }
-  }, [fetchData, notice, toast]);
+  }, [fetchData, toast]);
 
   const sortedEvents = useMemo(() => {
     const hasCoords = profile.latitude != null && profile.longitude != null;
@@ -559,6 +571,19 @@ export default function Discover() {
     return hydrated;
   };
 
+  const viewEventDetails = async (event: ExternalEvent) => {
+    const ready = await ensureEventReady(event);
+    if (!ready.supabaseId) {
+      toast({
+        title: 'Unable to open details',
+        description: 'Please try again in a moment.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    navigate(`/events/${ready.supabaseId}`);
+  };
+
   if (authLoading) {
     return (
       <div className="min-h-screen gradient-bg flex items-center justify-center">
@@ -699,7 +724,7 @@ export default function Discover() {
                     eventType={event.eventType || undefined}
                     genres={event.genres || []}
                     source={event.source}
-                    onView={() => event.supabaseId && navigate(`/events/${event.supabaseId}`)}
+                    onView={() => viewEventDetails(event)}
                     onShare={() => handleShare(event)}
                     onToggleInterested={() => toggleInterested(event)}
                     onTogglePinned={() => togglePinned(event)}
@@ -762,7 +787,7 @@ export default function Discover() {
                     eventType={event.eventType || undefined}
                     genres={event.genres || []}
                     source={event.source}
-                    onView={() => event.supabaseId && navigate(`/events/${event.supabaseId}`)}
+                    onView={() => viewEventDetails(event)}
                     onShare={() => handleShare(event)}
                     onToggleInterested={() => toggleInterested(event)}
                     onTogglePinned={() => togglePinned(event)}

@@ -167,7 +167,7 @@ export default function Feed() {
     }
   }, [user]);
 
-  const fetchEvents = useCallback(async (pageToLoad: number = 0) => {
+  const fetchEvents = useCallback(async (pageToLoad: number = 0): Promise<string | null> => {
     if (import.meta.env.DEV) {
       console.debug('[feed] fetch start', { page: pageToLoad });
     }
@@ -206,6 +206,7 @@ export default function Feed() {
         size: 60,
         genres: selectedGenres.length > 0 ? selectedGenres : undefined,
       });
+      const refreshedNotice = nextNotice ?? null;
 
       if (import.meta.env.DEV) {
         console.debug('[feed] fetched', {
@@ -238,7 +239,7 @@ export default function Feed() {
         setMatchedEvents(hydratedMatched);
         setSuggestedEvents(hydratedSuggested);
         setVisibleCount(60);
-        setNotice(nextNotice ?? null);
+        setNotice(refreshedNotice);
       } else {
         setMatchedEvents(prev => Array.from(
           new Map([...prev, ...hydratedMatched].map(event => [event.id, event])).values(),
@@ -251,13 +252,18 @@ export default function Feed() {
 
       setPage(nextPage);
       setHasMore(nextHasMore);
+      return pageToLoad === 0 ? refreshedNotice : null;
     } catch (error) {
       if (import.meta.env.DEV) {
         console.error('[feed] fetch error', error);
       }
+      const fallbackNotice = pageToLoad === 0
+        ? 'Unable to refresh events right now. Please try again.'
+        : null;
       if (pageToLoad === 0) {
-        setNotice('Unable to refresh events right now. Please try again.');
+        setNotice(fallbackNotice);
       }
+      return fallbackNotice;
     } finally {
       loadMoreInFlightRef.current = false;
       setLoading(false);
@@ -277,11 +283,11 @@ export default function Feed() {
 
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
-    await fetchEvents(0);
-    if (notice) {
-      toast({ title: notice });
+    const refreshedNotice = await fetchEvents(0);
+    if (refreshedNotice) {
+      toast({ title: refreshedNotice });
     }
-  }, [fetchEvents, notice, toast]);
+  }, [fetchEvents, toast]);
 
   const fetchEventActions = useCallback(async () => {
     if (!user) return;
@@ -330,6 +336,19 @@ export default function Feed() {
       prev.map(item => (item.externalId || item.id) === key ? hydrated : item)
     );
     return hydrated;
+  };
+
+  const viewEventDetails = async (event: ExternalEvent) => {
+    const ready = await ensureEventReady(event);
+    if (!ready.supabaseId) {
+      toast({
+        title: 'Unable to open details',
+        description: 'Please try again in a moment.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    navigate(`/events/${ready.supabaseId}`);
   };
 
   const fetchUserGroups = useCallback(async () => {
@@ -876,7 +895,7 @@ export default function Feed() {
                             ))
                           : undefined
                       }
-                      onView={() => event.supabaseId && navigate(`/events/${event.supabaseId}`)}
+                      onView={() => viewEventDetails(event)}
                       onShare={() => handleShare(event)}
                       onToggleInterested={() => toggleInterested(event)}
                       onTogglePinned={() => togglePinned(event)}
@@ -922,7 +941,7 @@ export default function Feed() {
                             ))
                           : undefined
                       }
-                      onView={() => event.supabaseId && navigate(`/events/${event.supabaseId}`)}
+                      onView={() => viewEventDetails(event)}
                       onShare={() => handleShare(event)}
                       onToggleInterested={() => toggleInterested(event)}
                       onTogglePinned={() => togglePinned(event)}
