@@ -135,6 +135,12 @@ Set the Tickster key:
 supabase secrets set TICKSTER_API_KEY=YOUR_TICKSTER_API_KEY
 ```
 
+Set the Last.fm key (artist tag enrichment for electronic relevance):
+
+```sh
+supabase secrets set LASTFM_API_KEY=YOUR_LASTFM_API_KEY
+```
+
 Deploy Tickster + aggregate functions (public for internal calls):
 
 ```sh

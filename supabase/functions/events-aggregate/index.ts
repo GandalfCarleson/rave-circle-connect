@@ -1,4 +1,6 @@
 import { serve } from "https://deno.land/std@0.203.0/http/server.ts";
+import { LastFmService } from "../_shared/lastFmService.ts";
+import { classifyArtistTags, extractArtistCandidates } from "../_shared/artistClassifier.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -57,7 +59,16 @@ type AggregatedEvent = {
   lat?: number | null;
   lng?: number | null;
   genres?: string[] | null;
+  artists?: string[] | null;
+  electronicScore?: number | null;
+  lastFmTagged?: boolean | null;
 };
+
+const LASTFM_MAX_ARTIST_LOOKUPS = 30;
+const LASTFM_ARTISTS_PER_EVENT = 3;
+const LASTFM_LOOKUP_CONCURRENCY = 6;
+const STRONG_NON_ELECTRONIC_SCORE = -4;
+const PROVIDER_ELECTRONIC_BONUS = 2;
 
 const ELECTRONIC_TERMS = [
   "electronic",
@@ -206,6 +217,121 @@ const dedupeEvents = (events: AggregatedEvent[]) => {
   return final;
 };
 
+const parseEventTime = (event: AggregatedEvent) => {
+  const time = event.startTime ? new Date(event.startTime).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+};
+
+type ElectronicRankingResult = {
+  events: AggregatedEvent[];
+  scoreByEventId: Map<string, number>;
+  lastFmTaggedByEventId: Map<string, boolean>;
+  lookedUpArtists: number;
+  eventsWithArtistSignal: number;
+  filteredOutByScore: number;
+  lastFmEnabled: boolean;
+};
+
+const rankEventsByElectronicRelevance = async (
+  events: AggregatedEvent[],
+  size: number,
+  lastFmApiKey: string | null,
+) : Promise<ElectronicRankingResult> => {
+  if (events.length === 0) {
+    return {
+      events: [],
+      scoreByEventId: new Map(),
+      lastFmTaggedByEventId: new Map(),
+      lookedUpArtists: 0,
+      eventsWithArtistSignal: 0,
+      filteredOutByScore: 0,
+      lastFmEnabled: Boolean(lastFmApiKey),
+    };
+  }
+
+  const eventArtists = events.map((event) => ({
+    event,
+    artists: extractArtistCandidates(
+      { title: event.title ?? "", artists: event.artists ?? [] },
+      LASTFM_ARTISTS_PER_EVENT,
+    ),
+  }));
+
+  const scoreByEventId = new Map<string, number>();
+  const lastFmTaggedByEventId = new Map<string, boolean>();
+
+  if (!lastFmApiKey) {
+    eventArtists.forEach(({ event }) => {
+      scoreByEventId.set(event.id, eventMatchesElectronic(event) ? PROVIDER_ELECTRONIC_BONUS : 0);
+      lastFmTaggedByEventId.set(event.id, false);
+    });
+    const sorted = [...events].sort((a, b) => parseEventTime(a) - parseEventTime(b));
+    return {
+      events: sorted,
+      scoreByEventId,
+      lastFmTaggedByEventId,
+      lookedUpArtists: 0,
+      eventsWithArtistSignal: 0,
+      filteredOutByScore: 0,
+      lastFmEnabled: false,
+    };
+  }
+
+  const uniqueArtists = Array.from(new Set(eventArtists.flatMap((entry) => entry.artists)));
+  const artistsToLookup = uniqueArtists.slice(0, LASTFM_MAX_ARTIST_LOOKUPS);
+  const lastFm = new LastFmService(lastFmApiKey);
+  const tagsByArtist = await lastFm.getTopTagsForArtists(artistsToLookup, LASTFM_LOOKUP_CONCURRENCY);
+
+  const artistScoreByName = new Map<string, number>();
+  artistsToLookup.forEach((artist) => {
+    const classification = classifyArtistTags(tagsByArtist.get(artist) || []);
+    artistScoreByName.set(artist, classification.score);
+  });
+
+  let eventsWithArtistSignal = 0;
+  const scored = eventArtists.map(({ event, artists }) => {
+    const artistScores = artists
+      .map((artist) => artistScoreByName.get(artist))
+      .filter((score): score is number => typeof score === "number");
+
+    const averageArtistScore = artistScores.length > 0
+      ? artistScores.reduce((sum, score) => sum + score, 0) / artistScores.length
+      : 0;
+    const bestArtistScore = artistScores.length > 0 ? Math.max(...artistScores) : 0;
+    const artistSignal = artistScores.length > 0 ? Math.max(bestArtistScore, averageArtistScore) : 0;
+    if (artistScores.some((score) => Math.abs(score) >= 3)) {
+      eventsWithArtistSignal += 1;
+    }
+
+    const providerSignal = eventMatchesElectronic(event) ? PROVIDER_ELECTRONIC_BONUS : 0;
+    const score = artistSignal + providerSignal;
+    scoreByEventId.set(event.id, score);
+    lastFmTaggedByEventId.set(event.id, artistScores.length > 0);
+
+    return { event, score };
+  });
+
+  const filtered = scored.filter((entry) => entry.score > STRONG_NON_ELECTRONIC_SCORE);
+  const minimumPool = Math.min(size, 12);
+  const pool = filtered.length >= minimumPool ? filtered : scored;
+  const filteredOutByScore = scored.length - filtered.length;
+
+  pool.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return parseEventTime(a.event) - parseEventTime(b.event);
+  });
+
+  return {
+    events: pool.map((entry) => entry.event),
+    scoreByEventId,
+    lastFmTaggedByEventId,
+    lookedUpArtists: artistsToLookup.length,
+    eventsWithArtistSignal,
+    filteredOutByScore,
+    lastFmEnabled: true,
+  };
+};
+
 type ProviderResult = {
   ok: boolean;
   events: AggregatedEvent[];
@@ -323,6 +449,8 @@ serve(async (req) => {
   const size = Math.min(toNumber(url.searchParams.get("size"), 60), 100);
   const page = Math.max(0, toNumber(url.searchParams.get("page"), 0));
   const electronicOnly = url.searchParams.get("electronicOnly") === "true";
+  const electronicBias = url.searchParams.get("electronicBias") !== "false";
+  const lastFmApiKey = Deno.env.get("LASTFM_API_KEY");
   const selectedGenres = (url.searchParams.get("genres") || "")
     .split(",")
     .map((genre) => genre.trim().toLowerCase())
@@ -330,7 +458,7 @@ serve(async (req) => {
   const startDateTime = formatDateParam(url.searchParams.get("startDateTime"));
   const endDateTime = formatDateParam(url.searchParams.get("endDateTime"));
 
-  const cacheKey = `aggregate:${lat}:${lng}:${radiusKm ?? "none"}:${page}:${size}:${selectedGenres.join("|")}:${electronicOnly}:${startDateTime || ""}:${endDateTime || ""}`;
+  const cacheKey = `aggregate:${lat}:${lng}:${radiusKm ?? "none"}:${page}:${size}:${selectedGenres.join("|")}:${electronicOnly}:${electronicBias}:${Boolean(lastFmApiKey)}:${startDateTime || ""}:${endDateTime || ""}`;
   const cached = getCached(cacheKey);
   if (cached) {
     return jsonResponse(cached);
@@ -451,11 +579,32 @@ serve(async (req) => {
     });
   }
 
-  deduped.sort((a, b) => {
-    const aTime = a.startTime ? new Date(a.startTime).getTime() : 0;
-    const bTime = b.startTime ? new Date(b.startTime).getTime() : 0;
-    return aTime - bTime;
-  });
+  let scoreByEventId = new Map<string, number>();
+  let lastFmTaggedByEventId = new Map<string, boolean>();
+  let lookedUpArtists = 0;
+  let eventsWithArtistSignal = 0;
+  let filteredOutByScore = 0;
+  let lastFmEnabled = false;
+
+  if (electronicBias) {
+    const rankingResult = await rankEventsByElectronicRelevance(deduped, size, lastFmApiKey);
+    deduped = rankingResult.events;
+    scoreByEventId = rankingResult.scoreByEventId;
+    lastFmTaggedByEventId = rankingResult.lastFmTaggedByEventId;
+    lookedUpArtists = rankingResult.lookedUpArtists;
+    eventsWithArtistSignal = rankingResult.eventsWithArtistSignal;
+    filteredOutByScore = rankingResult.filteredOutByScore;
+    lastFmEnabled = rankingResult.lastFmEnabled;
+  } else {
+    deduped.sort((a, b) => parseEventTime(a) - parseEventTime(b));
+  }
+
+  const sortByScoreThenTime = (a: AggregatedEvent, b: AggregatedEvent) => {
+    const scoreA = scoreByEventId.get(a.id) ?? 0;
+    const scoreB = scoreByEventId.get(b.id) ?? 0;
+    if (scoreB !== scoreA) return scoreB - scoreA;
+    return parseEventTime(a) - parseEventTime(b);
+  };
 
   let pageEvents = deduped.slice(0, size);
   const hasTicketmasterEvent = pageEvents.some((event) => event.source === "ticketmaster");
@@ -468,13 +617,17 @@ serve(async (req) => {
       .slice(0, Math.min(5, size));
     if (supplemental.length > 0) {
       pageEvents = [...pageEvents, ...supplemental]
-        .sort((a, b) => {
-          const aTime = a.startTime ? new Date(a.startTime).getTime() : 0;
-          const bTime = b.startTime ? new Date(b.startTime).getTime() : 0;
-          return aTime - bTime;
-        })
+        .sort(sortByScoreThenTime)
         .slice(0, size);
     }
+  }
+
+  if (electronicBias) {
+    pageEvents = pageEvents.map((event) => ({
+      ...event,
+      electronicScore: scoreByEventId.get(event.id) ?? 0,
+      lastFmTagged: lastFmEnabled ? (lastFmTaggedByEventId.get(event.id) ?? false) : false,
+    }));
   }
   const hasMore = deduped.length > size || page + 1 < Math.max(tmMeta.totalPages, tkMeta.totalPages);
   let notice: string | undefined;
@@ -506,6 +659,15 @@ serve(async (req) => {
         ...(tkMeta.error ? { error: tkMeta.error } : {}),
       },
     },
+    enrichment: {
+      electronicBiasApplied: electronicBias,
+      lastFm: {
+        enabled: lastFmEnabled,
+        lookedUpArtists,
+        eventsWithArtistSignal,
+        filteredOutByScore,
+      },
+    },
   };
 
   console.log("events-aggregate", {
@@ -515,6 +677,10 @@ serve(async (req) => {
     returned: pageEvents.length,
     ticketmaster: { ok: tmMeta.ok, count: tmMeta.count },
     tickster: { ok: tkMeta.ok, count: tkMeta.count },
+    electronicBias,
+    lastFmEnabled,
+    lookedUpArtists,
+    filteredOutByScore,
   });
 
   setCached(cacheKey, responseBody);

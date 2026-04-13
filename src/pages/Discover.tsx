@@ -741,6 +741,7 @@ export default function Discover() {
                     eventType={event.eventType || undefined}
                     genres={event.genres || []}
                     source={event.source}
+                    lastFmTagged={event.lastFmTagged}
                     onView={() => viewEventDetails(event)}
                     onShare={() => handleShare(event)}
                     onToggleInterested={() => toggleInterested(event)}
@@ -804,6 +805,7 @@ export default function Discover() {
                     eventType={event.eventType || undefined}
                     genres={event.genres || []}
                     source={event.source}
+                    lastFmTagged={event.lastFmTagged}
                     onView={() => viewEventDetails(event)}
                     onShare={() => handleShare(event)}
                     onToggleInterested={() => toggleInterested(event)}

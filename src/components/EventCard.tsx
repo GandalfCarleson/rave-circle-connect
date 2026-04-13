@@ -17,6 +17,7 @@ interface EventCardProps {
   eventType?: string;
   genres?: string[];
   source?: string;
+  lastFmTagged?: boolean;
   distance?: number;
   onView?: () => void;
   onShare?: () => void;
@@ -38,6 +39,7 @@ export function EventCard({
   eventType,
   genres = [],
   source,
+  lastFmTagged,
   distance,
   onView,
   onShare,
@@ -137,10 +139,19 @@ export function EventCard({
             {eventTypeLabel}
           </span>
         )}
-        {sourceLabel && (
-          <span className="absolute bottom-3 left-3 rounded-full border border-border/70 bg-card/80 px-2.5 py-1 text-xs font-medium text-foreground backdrop-blur-sm">
-            {sourceLabel}
-          </span>
+        {(sourceLabel || lastFmTagged) && (
+          <div className="absolute bottom-3 left-3 flex items-center gap-2">
+            {sourceLabel && (
+              <span className="rounded-full border border-border/70 bg-card/80 px-2.5 py-1 text-xs font-medium text-foreground backdrop-blur-sm">
+                {sourceLabel}
+              </span>
+            )}
+            {lastFmTagged && (
+              <span className="rounded-full border border-emerald-400/50 bg-emerald-500/20 px-2.5 py-1 text-xs font-medium text-emerald-100 backdrop-blur-sm">
+                Last.fm
+              </span>
+            )}
+          </div>
         )}
 
         {/* Price badge */}

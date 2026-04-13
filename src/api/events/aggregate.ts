@@ -20,6 +20,9 @@ export type AggregatedEvent = {
   priceFrom?: number | null;
   currency?: string | null;
   genres: string[];
+  artists?: string[] | null;
+  electronicScore?: number | null;
+  lastFmTagged?: boolean | null;
 };
 
 export type AggregatedEventsResponse = {
@@ -31,6 +34,15 @@ export type AggregatedEventsResponse = {
   sources?: {
     ticketmaster?: { ok: boolean; error?: string; count: number };
     tickster?: { ok: boolean; error?: string; count: number };
+  };
+  enrichment?: {
+    electronicBiasApplied?: boolean;
+    lastFm?: {
+      enabled?: boolean;
+      lookedUpArtists?: number;
+      eventsWithArtistSignal?: number;
+      filteredOutByScore?: number;
+    };
   };
 };
 
@@ -74,10 +86,9 @@ export async function fetchAggregatedEvents(params: AggregateQuery): Promise<Agg
   const bearerToken = accessToken || anonJwt;
 
   const headers: Record<string, string> = {};
-  const anonKey = supabaseKey.startsWith('eyJ') ? supabaseKey : undefined;
-  if (anonKey) {
-    headers.apikey = anonKey;
-  }
+  // apikey must always be sent for Edge Function gateway auth.
+  // Supports both legacy JWT anon keys and new sb_publishable_* keys.
+  headers.apikey = supabaseKey;
   if (bearerToken) {
     headers.Authorization = `Bearer ${bearerToken}`;
   }

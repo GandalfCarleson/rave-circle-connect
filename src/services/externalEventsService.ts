@@ -21,6 +21,8 @@ export type ExternalEvent = {
   eventType?: string;
   genres?: string[];
   source?: string;
+  electronicScore?: number;
+  lastFmTagged?: boolean;
 };
 
 const PRIORITY_CITIES = [
@@ -153,6 +155,8 @@ const toExternalEvent = (event: AggregatedEvent): ExternalEvent | null => {
     eventType: inferEventType(event),
     genres: event.genres || [],
     source: event.source,
+    electronicScore: event.electronicScore ?? undefined,
+    lastFmTagged: event.lastFmTagged ?? undefined,
   };
 };
 

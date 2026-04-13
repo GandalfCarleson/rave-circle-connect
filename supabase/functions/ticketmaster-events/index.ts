@@ -47,6 +47,7 @@ type TicketmasterEvent = {
     timezone?: string;
   };
   _embedded?: {
+    attractions?: Array<{ name?: string }>;
     venues?: Array<{
       name?: string;
       city?: { name?: string };
@@ -55,6 +56,18 @@ type TicketmasterEvent = {
       location?: { latitude?: string; longitude?: string };
     }>;
   };
+};
+
+const collectArtists = (attractions: Array<{ name?: string }> | undefined) => {
+  if (!attractions) return [] as string[];
+  const unique = new Set<string>();
+  attractions.forEach((item) => {
+    const name = (item?.name || "").trim();
+    if (name.length >= 2) {
+      unique.add(name);
+    }
+  });
+  return Array.from(unique).slice(0, 5);
 };
 
 const collectGenres = (classifications: Classification[] | undefined) => {
@@ -190,6 +203,7 @@ serve(async (req) => {
       priceFrom: event?.priceRanges?.[0]?.min ?? null,
       currency: event?.priceRanges?.[0]?.currency ?? null,
       genres: collectGenres(event?.classifications),
+      artists: collectArtists(event?._embedded?.attractions),
     };
   });
 

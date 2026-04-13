@@ -904,6 +904,7 @@ export default function Feed() {
                       eventType={event.eventType || undefined}
                       genres={event.genres || []}
                       source={event.source}
+                      lastFmTagged={event.lastFmTagged}
                       distance={
                         profile.latitude && profile.longitude && event.latitude && event.longitude
                           ? Math.round(calculateDistance(
@@ -950,6 +951,7 @@ export default function Feed() {
                       eventType={event.eventType || undefined}
                       genres={event.genres || []}
                       source={event.source}
+                      lastFmTagged={event.lastFmTagged}
                       distance={
                         profile.latitude && profile.longitude && event.latitude && event.longitude
                           ? Math.round(calculateDistance(

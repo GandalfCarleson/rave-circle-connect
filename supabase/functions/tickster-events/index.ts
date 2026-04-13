@@ -125,6 +125,48 @@ const asRecord = (value: unknown): JsonRecord | null =>
 const asRecordArray = (value: unknown): JsonRecord[] =>
   Array.isArray(value) ? value.filter((item): item is JsonRecord => Boolean(asRecord(item))) : [];
 
+const extractArtistNames = (value: unknown): string[] => {
+  if (!value) return [];
+  if (typeof value === "string") {
+    const name = value.trim();
+    return name.length >= 2 ? [name] : [];
+  }
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((item) => extractArtistNames(item))
+      .filter((name) => name.length >= 2);
+  }
+  const record = asRecord(value);
+  if (!record) return [];
+  const candidates = [
+    record.name,
+    record.title,
+    record.artist,
+    record.performer,
+  ];
+  return candidates
+    .flatMap((item) => extractArtistNames(item))
+    .filter((name) => name.length >= 2);
+};
+
+const collectArtists = (event: JsonRecord) => {
+  const unique = new Set<string>();
+  const candidateFields = [
+    event.artists,
+    event.acts,
+    event.performers,
+    event.lineup,
+    event.lineUp,
+    event.artist,
+    event.mainArtist,
+    event.headliner,
+  ];
+  candidateFields.forEach((fieldValue) => {
+    extractArtistNames(fieldValue).forEach((name) => unique.add(name));
+  });
+  return Array.from(unique).slice(0, 5);
+};
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -286,6 +328,7 @@ serve(async (req) => {
       || (typeof priceInfo?.currency === "string" ? priceInfo.currency : undefined)
       || null,
     genres,
+    artists: collectArtists(event),
   };
   });
 
