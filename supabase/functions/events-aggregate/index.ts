@@ -67,8 +67,9 @@ type AggregatedEvent = {
 const LASTFM_MAX_ARTIST_LOOKUPS = 30;
 const LASTFM_ARTISTS_PER_EVENT = 3;
 const LASTFM_LOOKUP_CONCURRENCY = 6;
-const STRONG_NON_ELECTRONIC_SCORE = -4;
-const PROVIDER_ELECTRONIC_BONUS = 2;
+const PROVIDER_ELECTRONIC_BONUS = 1;
+const STRONG_ELECTRONIC_ARTIST_BONUS = 4;
+const EXCLUDED_ARTIST_PENALTY = 8;
 
 const ELECTRONIC_TERMS = [
   "electronic",
@@ -232,6 +233,13 @@ type ElectronicRankingResult = {
   lastFmEnabled: boolean;
 };
 
+type RankedEvent = {
+  event: AggregatedEvent;
+  score: number;
+  hasTaggedArtist: boolean;
+  state: "electronic" | "adjacent" | "exclude";
+};
+
 const rankEventsByElectronicRelevance = async (
   events: AggregatedEvent[],
   size: number,
@@ -248,6 +256,11 @@ const rankEventsByElectronicRelevance = async (
       lastFmEnabled: Boolean(lastFmApiKey),
     };
   }
+
+  const sortRankedByScoreThenTime = (a: RankedEvent, b: RankedEvent) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return parseEventTime(a.event) - parseEventTime(b.event);
+  };
 
   const eventArtists = events.map((event) => ({
     event,
@@ -282,44 +295,83 @@ const rankEventsByElectronicRelevance = async (
   const lastFm = new LastFmService(lastFmApiKey);
   const tagsByArtist = await lastFm.getTopTagsForArtists(artistsToLookup, LASTFM_LOOKUP_CONCURRENCY);
 
-  const artistScoreByName = new Map<string, number>();
+  const artistClassificationsByName = new Map<string, ReturnType<typeof classifyArtistTags>>();
   artistsToLookup.forEach((artist) => {
-    const classification = classifyArtistTags(tagsByArtist.get(artist) || []);
-    artistScoreByName.set(artist, classification.score);
+    const classification = classifyArtistTags(tagsByArtist.get(artist) || [], artist);
+    artistClassificationsByName.set(artist, classification);
   });
 
   let eventsWithArtistSignal = 0;
   const scored = eventArtists.map(({ event, artists }) => {
-    const artistScores = artists
-      .map((artist) => artistScoreByName.get(artist))
-      .filter((score): score is number => typeof score === "number");
+    const artistClassifications = artists
+      .map((artist) => artistClassificationsByName.get(artist))
+      .filter((classification): classification is ReturnType<typeof classifyArtistTags> => Boolean(classification));
+
+    const artistScores = artistClassifications.map((classification) => classification.score);
+    const hasTaggedArtist = artistClassifications.some((classification) => classification.hasTagData);
+    const hasElectronicArtist = artistClassifications.some((classification) => classification.state === "electronic");
+    const hasExcludedArtist = artistClassifications.some((classification) => classification.state === "exclude");
 
     const averageArtistScore = artistScores.length > 0
       ? artistScores.reduce((sum, score) => sum + score, 0) / artistScores.length
       : 0;
     const bestArtistScore = artistScores.length > 0 ? Math.max(...artistScores) : 0;
-    const artistSignal = artistScores.length > 0 ? Math.max(bestArtistScore, averageArtistScore) : 0;
-    if (artistScores.some((score) => Math.abs(score) >= 3)) {
+    let artistSignal = artistScores.length > 0 ? Math.max(bestArtistScore, averageArtistScore) : 0;
+    if (hasElectronicArtist) {
+      artistSignal += STRONG_ELECTRONIC_ARTIST_BONUS;
+    } else if (hasExcludedArtist) {
+      artistSignal -= EXCLUDED_ARTIST_PENALTY;
+    }
+
+    if (hasTaggedArtist) {
       eventsWithArtistSignal += 1;
     }
 
     const providerSignal = eventMatchesElectronic(event) ? PROVIDER_ELECTRONIC_BONUS : 0;
     const score = artistSignal + providerSignal;
     scoreByEventId.set(event.id, score);
-    lastFmTaggedByEventId.set(event.id, artistScores.length > 0);
+    lastFmTaggedByEventId.set(event.id, hasTaggedArtist);
 
-    return { event, score };
+    const state: RankedEvent["state"] = hasElectronicArtist
+      ? "electronic"
+      : hasExcludedArtist
+        ? "exclude"
+        : "adjacent";
+
+    return { event, score, hasTaggedArtist, state };
   });
 
-  const filtered = scored.filter((entry) => entry.score > STRONG_NON_ELECTRONIC_SCORE);
+  // Strict mode: require at least one strong electronic-tagged artist.
+  const primaryElectronic = scored
+    .filter((entry) => entry.state === "electronic")
+    .sort(sortRankedByScoreThenTime);
+  const fallbackUnknown = scored
+    .filter((entry) => entry.state === "adjacent" && !entry.hasTaggedArtist)
+    .sort(sortRankedByScoreThenTime);
+  const fallbackAdjacent = scored
+    .filter((entry) => entry.state === "adjacent" && entry.hasTaggedArtist)
+    .sort(sortRankedByScoreThenTime);
+
   const minimumPool = Math.min(size, 12);
-  const pool = filtered.length >= minimumPool ? filtered : scored;
-  const filteredOutByScore = scored.length - filtered.length;
+  const pool = [...primaryElectronic];
+  if (pool.length < minimumPool) {
+    const needed = minimumPool - pool.length;
+    pool.push(...fallbackUnknown.slice(0, needed));
+  }
+  if (pool.length < minimumPool) {
+    const needed = minimumPool - pool.length;
+    pool.push(...fallbackAdjacent.slice(0, needed));
+  }
+  if (pool.length === 0) {
+    const nonExcluded = scored
+      .filter((entry) => entry.state !== "exclude")
+      .sort(sortRankedByScoreThenTime);
+    const finalFallback = nonExcluded.length > 0 ? nonExcluded : [...scored].sort(sortRankedByScoreThenTime);
+    pool.push(...finalFallback.slice(0, minimumPool));
+  }
 
-  pool.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    return parseEventTime(a.event) - parseEventTime(b.event);
-  });
+  const selectedIds = new Set(pool.map((entry) => entry.event.id));
+  const filteredOutByScore = scored.filter((entry) => !selectedIds.has(entry.event.id)).length;
 
   return {
     events: pool.map((entry) => entry.event),

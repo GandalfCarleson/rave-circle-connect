@@ -1,6 +1,6 @@
 type CacheEntry = {
   expiresAt: number;
-  tags: string[];
+  tags: LastFmArtistTag[];
 };
 
 const ARTIST_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -9,7 +9,12 @@ const REQUEST_TIMEOUT_MS = 4000;
 const LASTFM_BASE_URL = "https://ws.audioscrobbler.com/2.0/";
 
 const artistTagCache = new Map<string, CacheEntry>();
-const inFlightByArtist = new Map<string, Promise<string[]>>();
+const inFlightByArtist = new Map<string, Promise<LastFmArtistTag[]>>();
+
+export type LastFmArtistTag = {
+  name: string;
+  count: number;
+};
 
 const normalizeArtist = (artist: string) =>
   artist
@@ -65,7 +70,7 @@ export class LastFmService {
         signal: controller.signal,
       });
       if (!response.ok) {
-        return [] as string[];
+        return [] as LastFmArtistTag[];
       }
 
       const payload = await response.json().catch(() => null) as
@@ -77,7 +82,7 @@ export class LastFmService {
         | null;
 
       if (!payload || payload.error || !payload.toptags?.tag) {
-        return [] as string[];
+        return [] as LastFmArtistTag[];
       }
 
       return payload.toptags.tag
@@ -87,16 +92,15 @@ export class LastFmService {
         }))
         .filter((tag) => tag.name.length > 0 && tag.count > 0)
         .sort((a, b) => b.count - a.count)
-        .slice(0, 20)
-        .map((tag) => tag.name);
+        .slice(0, 20);
     } catch {
-      return [] as string[];
+      return [] as LastFmArtistTag[];
     } finally {
       clearTimeout(timeoutId);
     }
   }
 
-  async getTopTags(artist: string): Promise<string[]> {
+  async getTopTags(artist: string): Promise<LastFmArtistTag[]> {
     const normalizedArtist = normalizeArtist(artist);
     if (!normalizedArtist) return [];
 
@@ -136,7 +140,7 @@ export class LastFmService {
       ),
     );
 
-    const tagsByArtist = new Map<string, string[]>();
+    const tagsByArtist = new Map<string, LastFmArtistTag[]>();
     await runWithConcurrency(uniqueArtists, concurrency, async (artist) => {
       const tags = await this.getTopTags(artist);
       tagsByArtist.set(artist, tags);
