@@ -1,7 +1,10 @@
 import { fetchAggregatedEvents, type AggregatedEvent } from '@/api/events/aggregate';
 import { supabase } from '@/integrations/supabase/client';
+import type { Enums, TablesInsert } from '@/integrations/supabase/types';
 
 type DateFilter = 'this_week' | 'next_week' | 'this_month' | 'this_year';
+type EventType = Enums<'event_type'>;
+type EventsInsert = TablesInsert<'events'>;
 
 export type ExternalEvent = {
   id: string;
@@ -136,6 +139,13 @@ const inferEventType = (event: AggregatedEvent) => {
   return undefined;
 };
 
+const toEventType = (value?: string | null): EventType | null => {
+  if (value === 'festival' || value === 'club' || value === 'rave' || value === 'concert') {
+    return value;
+  }
+  return null;
+};
+
 const toExternalEvent = (event: AggregatedEvent): ExternalEvent | null => {
   if (!event.startTime) return null;
   return {
@@ -263,7 +273,7 @@ export async function ensureSupabaseEvents(events: ExternalEvent[]) {
   });
 
   try {
-    const payload = toUpsert
+    const payload: EventsInsert[] = toUpsert
       .map(event => ({
       external_id: event.externalId || event.id,
       source: event.source || 'external',
@@ -276,7 +286,7 @@ export async function ensureSupabaseEvents(events: ExternalEvent[]) {
       min_price: event.minPrice ?? null,
       ticket_url: event.ticketUrl ?? null,
       image_url: event.imageUrl ?? null,
-      event_type: (event.eventType || null) as ExternalEvent['eventType'],
+      event_type: toEventType(event.eventType),
       genres: event.genres ?? [],
       latitude: event.latitude ?? null,
       longitude: event.longitude ?? null,
@@ -361,7 +371,7 @@ export async function fetchEventsWithFallback(options: {
       ? [1500]
       : Array.from(new Set([baseRadius, Math.max(baseRadius, 100)])).filter(r => r > 0);
 
-  let response = {
+  let response: Awaited<ReturnType<typeof fetchExternalEvents>> = {
     events: [] as ExternalEvent[],
     page,
     size,

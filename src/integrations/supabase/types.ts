@@ -158,6 +158,7 @@ export type Database = {
           id: string
           joined_at: string | null
           role: Database["public"]["Enums"]["app_role"] | null
+          status: string | null
           user_id: string
         }
         Insert: {
@@ -165,6 +166,7 @@ export type Database = {
           id?: string
           joined_at?: string | null
           role?: Database["public"]["Enums"]["app_role"] | null
+          status?: string | null
           user_id: string
         }
         Update: {
@@ -172,6 +174,7 @@ export type Database = {
           id?: string
           joined_at?: string | null
           role?: Database["public"]["Enums"]["app_role"] | null
+          status?: string | null
           user_id?: string
         }
         Relationships: [
@@ -266,7 +269,7 @@ export type Database = {
           retracted_by: string | null
           reply_to_message_id: string | null
           text: string | null
-          user_id: string
+          user_id: string | null
         }
         Insert: {
           attached_event_id?: string | null
@@ -281,7 +284,7 @@ export type Database = {
           retracted_by?: string | null
           reply_to_message_id?: string | null
           text?: string | null
-          user_id: string
+          user_id?: string | null
         }
         Update: {
           attached_event_id?: string | null
@@ -296,7 +299,7 @@ export type Database = {
           retracted_by?: string | null
           reply_to_message_id?: string | null
           text?: string | null
-          user_id?: string
+          user_id?: string | null
         }
         Relationships: [
           {
@@ -540,10 +543,64 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      group_last_activity: {
+        Row: {
+          group_id: string | null
+          last_activity_at: string | null
+          last_activity_preview: string | null
+          last_activity_type: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
-      [_ in never]: never
+      cleanup_retracted_messages: {
+        Args: { p_limit?: number }
+        Returns: number
+      }
+      get_group_for_member: {
+        Args: { p_group_id: string }
+        Returns: {
+          id: string
+          name: string
+          description: string | null
+          city: string | null
+          is_private: boolean | null
+          image_url: string | null
+          owner_id: string
+          created_at: string | null
+          updated_at: string | null
+        }[]
+      }
+      get_group_members: {
+        Args: { p_group_id: string }
+        Returns: {
+          id: string
+          user_id: string
+          role: Database["public"]["Enums"]["app_role"] | null
+          status: string | null
+          joined_at: string | null
+          name: string | null
+          avatar_url: string | null
+        }[]
+      }
+      get_user_groups: {
+        Args: Record<PropertyKey, never>
+        Returns: {
+          id: string
+          name: string
+          city: string | null
+          is_private: boolean | null
+          image_url: string | null
+          owner_id: string
+          role: Database["public"]["Enums"]["app_role"] | null
+          created_at: string | null
+        }[]
+      }
+      invite_user_to_group: {
+        Args: { p_group_id: string; p_username: string }
+        Returns: undefined
+      }
     }
     Enums: {
       app_role: "owner" | "admin" | "member"
@@ -680,6 +737,7 @@ export const Constants = {
       app_role: ["owner", "admin", "member"],
       event_status: ["going", "interested", "ignored"],
       event_type: ["festival", "club", "rave", "concert"],
+      message_type: ["text", "event", "system"],
     },
   },
 } as const

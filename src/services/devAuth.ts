@@ -1,9 +1,14 @@
 export type DevProfile = {
   name?: string;
   username?: string;
+  avatar_url?: string | null;
+  bio?: string;
   city?: string;
   latitude?: number | null;
   longitude?: number | null;
+  radius_km?: number;
+  is_discoverable?: boolean;
+  show_events_on_profile?: boolean;
   genres?: string[];
 };
 

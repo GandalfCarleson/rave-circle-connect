@@ -864,7 +864,6 @@ export default function Groups() {
                     handleDeleteCrew(actionGroup);
                   }
                   setConfirmDeleteOpen(false);
-                  setPendingAction(null);
                 }}
               >
                 Delete

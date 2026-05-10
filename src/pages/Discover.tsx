@@ -46,7 +46,7 @@ export default function Discover() {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [selectedEventToShare, setSelectedEventToShare] = useState<string | null>(null);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [userGroups, setUserGroups] = useState<Group[]>([]);
+  const [userGroups, setUserGroups] = useState<Array<{ id: string; name: string }>>([]);
   const [interestedEvents, setInterestedEvents] = useState<Set<string>>(new Set());
   const [pinnedEvents, setPinnedEvents] = useState<Set<string>>(new Set());
   const [profile, setProfile] = useState<Profile>({ city: null, radius_km: 100, latitude: null, longitude: null });
@@ -682,7 +682,6 @@ export default function Discover() {
                     name={group.name}
                     city={group.city || undefined}
                     isPrivate={group.is_private}
-                    memberCount={group.member_count}
                     onClick={() => navigate(`/groups/${group.id}`)}
                   />
                 </motion.div>

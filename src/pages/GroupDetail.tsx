@@ -121,7 +121,12 @@ const isSingleEmoji = (value: string) => {
   const trimmed = value.trim();
   if (!trimmed) return false;
   if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
-    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    const segmenter = new (Intl as typeof Intl & {
+      Segmenter: new (
+        locales?: string | string[],
+        options?: { granularity?: 'grapheme' | 'word' | 'sentence' },
+      ) => { segment: (input: string) => Iterable<unknown> };
+    }).Segmenter(undefined, { granularity: 'grapheme' });
     const segments = Array.from(segmenter.segment(trimmed));
     if (segments.length !== 1) return false;
   }
@@ -1456,7 +1461,7 @@ export default function GroupDetail() {
       {contextMenuPos && actionMessage && (
         <div
           className="fixed inset-0 z-50"
-          onClick={closeMessageMenus}
+          onClick={() => closeMessageMenus()}
           onContextMenu={(event) => {
             event.preventDefault();
             closeMessageMenus();
@@ -1486,7 +1491,7 @@ export default function GroupDetail() {
       )}
       {actionSheetOpen && actionMessage && (
         <div className="fixed inset-0 z-50">
-          <div className="absolute inset-0 bg-black/60" onClick={closeMessageMenus} />
+          <div className="absolute inset-0 bg-black/60" onClick={() => closeMessageMenus()} />
           <div className="absolute bottom-0 left-0 right-0 card-neon border border-border/60 rounded-t-2xl bg-card/95 backdrop-blur-sm p-4 space-y-3">
             {messageMenuItems.map((item) => {
               const Icon = item.icon;
@@ -1504,7 +1509,7 @@ export default function GroupDetail() {
             })}
             <button
               type="button"
-              onClick={closeMessageMenus}
+              onClick={() => closeMessageMenus()}
               className="w-full text-left px-4 py-3 rounded-lg text-sm text-muted-foreground hover:bg-muted/30"
             >
               Cancel
