@@ -351,6 +351,19 @@ END:VCALENDAR`;
             </div>
           )}
 
+          <div className="mb-6 flex flex-wrap gap-2">
+            {event.genres && event.genres.length > 0 && (
+              <span className="rounded-full border border-border/60 bg-muted/50 px-2.5 py-1 text-xs text-muted-foreground">
+                Matched because of genre
+              </span>
+            )}
+            {event.city && (
+              <span className="rounded-full border border-border/60 bg-muted/50 px-2.5 py-1 text-xs text-muted-foreground">
+                Matched because of location/radius
+              </span>
+            )}
+          </div>
+
           {/* Description */}
           {event.description && (
             <div className="mb-6">

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, memo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Compass, Users, Calendar, TrendingUp, RefreshCw } from 'lucide-react';
+import { Compass, Users, Calendar, TrendingUp, RefreshCw, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GroupCard } from '@/components/GroupCard';
 import { EventCard } from '@/components/EventCard';
@@ -58,6 +58,7 @@ export default function Discover() {
   const [hasMore, setHasMore] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [joiningGroupId, setJoiningGroupId] = useState<string | null>(null);
   const loadMoreInFlightRef = useRef(false);
 
   useEffect(() => {
@@ -560,6 +561,35 @@ export default function Discover() {
     }
   };
 
+  const joinPublicCrew = async (group: Group) => {
+    if (!user) return;
+    setJoiningGroupId(group.id);
+    const { error } = await supabase
+      .from('group_members')
+      .insert({
+        group_id: group.id,
+        user_id: user.id,
+        role: 'member',
+      });
+    setJoiningGroupId(null);
+
+    if (error) {
+      toast({
+        title: 'Unable to join crew',
+        description: error.message,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setUserGroups(prev => [...prev, { id: group.id, name: group.name }]);
+    toast({
+      title: 'Joined crew',
+      description: `You joined ${group.name}.`,
+    });
+    navigate(`/groups/${group.id}`);
+  };
+
   const ensureEventReady = async (event: ExternalEvent) => {
     if (event.supabaseId) return event;
     const [hydrated] = await ensureSupabaseEvents([event]);
@@ -683,6 +713,21 @@ export default function Discover() {
                     city={group.city || undefined}
                     isPrivate={group.is_private}
                     onClick={() => navigate(`/groups/${group.id}`)}
+                    action={userGroups.some(userGroup => userGroup.id === group.id) ? undefined : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={joiningGroupId === group.id}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          joinPublicCrew(group);
+                        }}
+                      >
+                        <UserPlus className="w-4 h-4" />
+                        Join
+                      </Button>
+                    )}
                   />
                 </motion.div>
               ))}

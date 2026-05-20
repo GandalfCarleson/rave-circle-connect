@@ -151,7 +151,7 @@ export function MessageBubble({
             )}
             {requiredPins && requiredPins > 0 && (
               <div className="mt-2 px-1 text-[11px] text-muted-foreground">
-                Pinned by {pinCount ?? 0}/{requiredPins}
+                {(pinCount ?? 0) >= requiredPins ? 'Crew Pick' : (pinCount ?? 0) > 0 ? 'Considering' : 'Suggested'} - {pinCount ?? 0}/{requiredPins} votes
               </div>
             )}
           </div>

@@ -159,6 +159,7 @@ export default function GroupDetail() {
   const typingTimeoutRef = useRef<number | null>(null);
   const [typingUsers, setTypingUsers] = useState<Record<string, number>>({});
   const [crewPinCounts, setCrewPinCounts] = useState<Record<string, number>>({});
+  const [crewPinNames, setCrewPinNames] = useState<Record<string, string[]>>({});
   const [crewPinnedByUser, setCrewPinnedByUser] = useState<Set<string>>(new Set());
   const [crewBoardEvents, setCrewBoardEvents] = useState<ExternalEvent[]>([]);
   const [groupReads, setGroupReads] = useState<Record<string, string>>({});
@@ -186,6 +187,11 @@ export default function GroupDetail() {
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const memberCount = Math.max(1, members.length);
   const requiredPins = Math.max(1, Math.ceil(memberCount * 0.6));
+  const getPlanningStatus = (pinCount: number) => {
+    if (pinCount >= requiredPins) return 'Crew Pick';
+    if (pinCount > 0) return 'Considering';
+    return 'Suggested';
+  };
 
   const fetchGroup = useCallback(async () => {
     if (!groupId) return;
@@ -626,6 +632,7 @@ export default function GroupDetail() {
     if (!user || !groupId) return;
     if (eventIds.length === 0) {
       setCrewPinCounts({});
+      setCrewPinNames({});
       setCrewPinnedByUser(new Set());
       return;
     }
@@ -635,13 +642,35 @@ export default function GroupDetail() {
     ]);
     setCrewPinCounts(counts);
     setCrewPinnedByUser(pinnedByUser);
+
+    const { data: pins } = await supabase
+      .from('crew_event_pins')
+      .select('event_id, user_id')
+      .eq('crew_id', groupId)
+      .in('event_id', Array.from(new Set(eventIds)));
+    const userIds = Array.from(new Set((pins || []).map((pin) => pin.user_id)));
+    const { data: profiles } = userIds.length > 0
+      ? await supabase
+          .from('profiles')
+          .select('user_id, name')
+          .in('user_id', userIds)
+      : { data: [] as Array<{ user_id: string; name: string | null }> };
+    const nameByUser = new Map((profiles || []).map((profile) => [profile.user_id, profile.name || 'Someone']));
+    const namesByEvent: Record<string, string[]> = {};
+    (pins || []).forEach((pin) => {
+      if (!namesByEvent[pin.event_id]) namesByEvent[pin.event_id] = [];
+      namesByEvent[pin.event_id].push(nameByUser.get(pin.user_id) || 'Someone');
+    });
+    setCrewPinNames(namesByEvent);
   }, [groupId, user]);
 
   const fetchCrewPinnedEvents = useCallback(async (pinsRequired: number = requiredPins) => {
     if (!groupId) return;
     const events = await getCrewPinnedEvents(groupId, pinsRequired);
     setCrewBoardEvents(events);
-  }, [groupId, requiredPins]);
+    const eventIds = events.map((event) => event.supabaseId).filter((eventId): eventId is string => Boolean(eventId));
+    refreshCrewPins(eventIds);
+  }, [groupId, refreshCrewPins, requiredPins]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -1125,7 +1154,8 @@ export default function GroupDetail() {
           <div className="group-chat__messages flex-1 min-h-0 overflow-y-auto max-w-lg mx-auto w-full px-4 py-4">
             {messages.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
-                <p>No messages yet. Start the conversation!</p>
+                <p>No crew chat yet.</p>
+                <p className="mt-1 text-xs">Share an event from the feed to start planning together.</p>
               </div>
             ) : (
               messages.map((message) => {
@@ -1325,25 +1355,38 @@ export default function GroupDetail() {
             {crewBoardEvents.length === 0 ? (
               <div className="text-center py-12 text-muted-foreground">
                 <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                <p>No crew-pinned events yet. Pin shared events in chat to add them here.</p>
+                <p>No crew plan yet.</p>
+                <p className="mt-1 text-xs">Pin or vote for shared events in chat. Events that reach the crew threshold become Crew Picks.</p>
               </div>
             ) : (
-              crewBoardEvents.map((event) => (
-                <EventCard
-                  key={event.externalId || event.id}
-                  id={event.id}
-                  name={event.name}
-                  venueName={event.venueName}
-                  city={event.city}
-                  startDatetime={event.startDateTime}
-                  endDatetime={event.endDateTime}
-                  minPrice={event.minPrice}
-                  imageUrl={event.imageUrl}
-                  eventType={event.eventType}
-                  genres={event.genres}
-                  onView={() => event.supabaseId && navigate(`/events/${event.supabaseId}`)}
-                />
-              ))
+              crewBoardEvents.map((event) => {
+                const eventId = event.supabaseId || event.id;
+                const pinCount = event.supabaseId ? crewPinCounts[event.supabaseId] || 0 : 0;
+                const voters = event.supabaseId ? crewPinNames[event.supabaseId] || [] : [];
+                return (
+                  <div key={event.externalId || event.id} className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-card/50 px-3 py-2 text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">{getPlanningStatus(pinCount)}</span>
+                      <span>{pinCount}/{requiredPins} votes</span>
+                      {voters.length > 0 && <span>Voted by {voters.join(', ')}</span>}
+                    </div>
+                    <EventCard
+                      id={eventId}
+                      name={event.name}
+                      venueName={event.venueName}
+                      city={event.city}
+                      startDatetime={event.startDateTime}
+                      endDatetime={event.endDateTime}
+                      minPrice={event.minPrice}
+                      imageUrl={event.imageUrl}
+                      eventType={event.eventType}
+                      genres={event.genres}
+                      matchReason={getPlanningStatus(pinCount)}
+                      onView={() => event.supabaseId && navigate(`/events/${event.supabaseId}`)}
+                    />
+                  </div>
+                );
+              })
             )}
           </div>
         </TabsContent>

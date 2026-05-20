@@ -328,10 +328,18 @@ export default function Auth() {
           }
 
           if (Object.keys(profileUpdates).length > 0) {
-            await supabase
+            const { error: profileError } = await supabase
               .from('profiles')
               .update(profileUpdates)
               .eq('user_id', session.user.id);
+            if (profileError) {
+              toast({
+                title: 'Profile setup failed',
+                description: profileError.message,
+                variant: 'destructive',
+              });
+              return;
+            }
           }
 
           const preferences = selectedGenres.map(genre => ({
@@ -341,9 +349,17 @@ export default function Auth() {
           }));
 
           if (preferences.length > 0) {
-            await supabase
+            const { error: preferencesError } = await supabase
               .from('user_preferences')
               .insert(preferences);
+            if (preferencesError) {
+              toast({
+                title: 'Preference setup failed',
+                description: preferencesError.message,
+                variant: 'destructive',
+              });
+              return;
+            }
           }
         }
 
@@ -813,22 +829,6 @@ export default function Auth() {
               </button>
             </div>
           )}
-          {/* Meta OAuth Placeholder */}
-          <div className="mt-6 pt-6 border-t border-border/50">
-            <Button
-              variant="outline"
-              disabled
-              className="w-full h-12 opacity-50 cursor-not-allowed"
-            >
-              <svg className="w-5 h-5 mr-2" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2C6.477 2 2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.879V14.89h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.989C18.343 21.129 22 16.99 22 12c0-5.523-4.477-10-10-10z"/>
-              </svg>
-              Continue with Meta ??? coming soon
-            </Button>
-            <p className="text-center text-xs text-muted-foreground mt-2">
-              Facebook & Instagram login coming soon
-            </p>
-          </div>
         </div>
       </motion.div>
     </div>

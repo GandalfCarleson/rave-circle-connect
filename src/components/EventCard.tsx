@@ -19,6 +19,7 @@ interface EventCardProps {
   source?: string;
   lastFmTagged?: boolean;
   distance?: number;
+  matchReason?: string;
   onView?: () => void;
   onShare?: () => void;
   onToggleInterested?: () => void;
@@ -41,6 +42,7 @@ export function EventCard({
   source,
   lastFmTagged,
   distance,
+  matchReason,
   onView,
   onShare,
   onToggleInterested,
@@ -155,9 +157,9 @@ export function EventCard({
         )}
 
         {/* Price badge */}
-        {minPrice && (
+        {minPrice != null && (
           <span className="absolute top-3 right-3 px-2.5 py-1 rounded-full bg-card/90 text-foreground text-xs font-medium backdrop-blur-sm">
-            from {minPrice} kr
+            {minPrice === 0 ? 'Free' : `from ${minPrice} kr`}
           </span>
         )}
       </div>
@@ -170,10 +172,16 @@ export function EventCard({
             <MapPin className="w-3.5 h-3.5" />
             <span className="truncate">
               {venueName && `${venueName}, `}{city}
-              {distance && ` • ${distance.toFixed(1)} km`}
+              {distance != null && ` • ${distance.toFixed(1)} km`}
             </span>
           </div>
         </div>
+
+        {matchReason && (
+          <div className="inline-flex rounded-full border border-border/60 bg-muted/50 px-2.5 py-1 text-xs text-muted-foreground">
+            {matchReason}
+          </div>
+        )}
 
         {/* Date & Time */}
         <div className="flex items-center gap-2 text-primary text-sm font-medium">

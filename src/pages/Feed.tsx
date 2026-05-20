@@ -394,9 +394,8 @@ export default function Feed() {
       fetchProfile();
       fetchPreferences();
       fetchUserGroups();
-      requestLocation();
     }
-  }, [fetchPreferences, fetchProfile, fetchUserGroups, requestLocation, user]);
+  }, [fetchPreferences, fetchProfile, fetchUserGroups, user]);
 
   useEffect(() => {
     if (user) {
@@ -437,10 +436,18 @@ export default function Feed() {
       return false;
     }
     // Type filter
-    if (selectedTypes.length > 0 && event.eventType && !selectedTypes.includes(event.eventType)) {
+    if (selectedTypes.length > 0 && (!event.eventType || !selectedTypes.includes(event.eventType))) {
       return false;
     }
     return true;
+  };
+
+  const getMatchReason = (event: ExternalEvent, matchedByGenre: boolean) => {
+    if (matchedByGenre) return 'Matched because of genre';
+    if (profile.latitude != null && profile.longitude != null && event.latitude != null && event.longitude != null) {
+      return 'Matched because of location/radius';
+    }
+    return 'Suggested because of date/proximity';
   };
 
   const filteredMatched = matchedEvents.filter(eventMatchesFilters);
@@ -765,7 +772,7 @@ export default function Feed() {
           <button
             type="button"
             onClick={requestLocation}
-            className="flex items-center gap-2 text-sm text-muted-foreground mb-4 hover:text-foreground transition-colors"
+            className="flex w-full items-center gap-2 text-sm text-muted-foreground mb-4 hover:text-foreground transition-colors"
             title="Use current location"
           >
             <MapPin className="w-4 h-4" />
@@ -778,6 +785,9 @@ export default function Feed() {
             ) : (
               <span className="text-primary font-medium">{currentRadiusOption.display}</span>
             )}
+            <span className="ml-auto rounded-full border border-border/60 px-2 py-0.5 text-xs text-foreground">
+              Use my location
+            </span>
           </button>
 
           {/* Date filters */}
@@ -855,22 +865,19 @@ export default function Feed() {
             <Compass className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
             <h3 className="font-display font-semibold text-lg mb-2">
               {visibleEvents.length === 0 && selectedGenres.length === 0 && selectedTypes.length === 0 && !selectedDate
-                ? 'No events detected in your area yet'
+                ? 'No events yet'
                 : 'No matching events'}
             </h3>
             <p className="text-muted-foreground text-sm mb-4 max-w-xs mx-auto">
               {visibleEvents.length === 0 && selectedGenres.length === 0 && selectedTypes.length === 0 && !selectedDate
-                ? 'No events detected in your area yet - expanding search radius.' 
-                : 'Try widening your radius or adjusting your filters to discover more events.'}
+                ? 'Add music genres in your profile and tap Use my location so RaveCircle can match events by taste and radius.'
+                : 'Try widening your radius, using your location, or adjusting your filters to discover more events.'}
             </p>
             <div className="flex flex-col gap-2 items-center">
               {visibleEvents.length === 0 && selectedGenres.length === 0 && selectedTypes.length === 0 && !selectedDate ? (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  {expandingSearch && (
-                    <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                  )}
-                  <span>{expandingSearch ? 'Expanding search...' : 'Searching nearby cities...'}</span>
-                </div>
+                <Button variant="neon-outline" onClick={requestLocation}>
+                  Use my location
+                </Button>
               ) : (
                 <Button variant="neon-outline" onClick={() => {
                   setSelectedGenres([]);
@@ -905,8 +912,9 @@ export default function Feed() {
                       genres={event.genres || []}
                       source={event.source}
                       lastFmTagged={event.lastFmTagged}
+                      matchReason={getMatchReason(event, true)}
                       distance={
-                        profile.latitude && profile.longitude && event.latitude && event.longitude
+                        profile.latitude != null && profile.longitude != null && event.latitude != null && event.longitude != null
                           ? Math.round(calculateDistance(
                               profile.latitude, profile.longitude,
                               event.latitude, event.longitude
@@ -952,8 +960,9 @@ export default function Feed() {
                       genres={event.genres || []}
                       source={event.source}
                       lastFmTagged={event.lastFmTagged}
+                      matchReason={getMatchReason(event, false)}
                       distance={
-                        profile.latitude && profile.longitude && event.latitude && event.longitude
+                        profile.latitude != null && profile.longitude != null && event.latitude != null && event.longitude != null
                           ? Math.round(calculateDistance(
                               profile.latitude, profile.longitude,
                               event.latitude, event.longitude
