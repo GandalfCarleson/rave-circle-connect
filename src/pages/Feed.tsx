@@ -340,7 +340,13 @@ export default function Feed() {
 
   const viewEventDetails = async (event: ExternalEvent) => {
     const ready = await ensureEventReady(event);
-    if (!ready.supabaseId) {
+    const detailId = ready.supabaseId || (ready.source === 'curated' ? ready.externalId : undefined);
+    if (!detailId) {
+      console.warn('[feed] unable to open event details', {
+        id: ready.id,
+        external_id: ready.externalId,
+        provider: ready.source,
+      });
       toast({
         title: 'Unable to open details',
         description: 'Please try again in a moment.',
@@ -348,10 +354,11 @@ export default function Feed() {
       });
       return;
     }
-    navigate(`/events/${ready.supabaseId}`, {
+    navigate(`/events/${detailId}`, {
       state: {
         eventPreview: {
-          id: ready.supabaseId,
+          id: detailId,
+          external_id: ready.externalId ?? null,
           name: ready.name,
           description: ready.description ?? null,
           venue_name: ready.venueName ?? null,
@@ -360,9 +367,11 @@ export default function Feed() {
           end_datetime: ready.endDateTime ?? null,
           min_price: ready.minPrice ?? null,
           ticket_url: ready.ticketUrl ?? null,
+          source_url: ready.sourceUrl ?? null,
           image_url: ready.imageUrl ?? null,
           event_type: ready.eventType ?? null,
           genres: ready.genres ?? [],
+          source: ready.source ?? null,
         },
       },
     });

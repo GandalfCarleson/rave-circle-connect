@@ -1,3 +1,4 @@
+import type { SyntheticEvent } from 'react';
 import { Calendar, MapPin, Send, Heart, Pin } from 'lucide-react';
 import { format, differenceInCalendarDays } from 'date-fns';
 import { motion } from 'framer-motion';
@@ -84,7 +85,14 @@ export function EventCard({
     ? 'Ticketmaster'
     : source === 'tickster'
       ? 'Tickster'
-      : source;
+      : source === 'curated'
+        ? 'RaveCircle Pick'
+        : source;
+  const handleImageError = (event: SyntheticEvent<HTMLImageElement>) => {
+    if (!event.currentTarget.src.endsWith('/demo-events/fallback-rave.jpg')) {
+      event.currentTarget.src = '/demo-events/fallback-rave.jpg';
+    }
+  };
 
   if (compact) {
     return (
@@ -95,7 +103,7 @@ export function EventCard({
         <div className="flex gap-3 p-3">
           <div className="relative w-20 h-20 rounded-lg overflow-hidden flex-shrink-0">
             {imageUrl ? (
-              <img src={imageUrl} alt={name} className="w-full h-full object-cover" />
+              <img src={imageUrl} alt={name} className="w-full h-full object-cover" onError={handleImageError} />
             ) : (
               <div className="w-full h-full bg-muted flex items-center justify-center">
                 <Calendar className="w-6 h-6 text-muted-foreground" />
@@ -127,6 +135,7 @@ export function EventCard({
             src={imageUrl}
             alt={name}
             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+            onError={handleImageError}
           />
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">

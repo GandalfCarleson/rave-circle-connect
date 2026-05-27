@@ -87,6 +87,7 @@ export default function SavedEvents() {
               imageUrl={event.imageUrl}
               eventType={event.eventType}
               genres={event.genres}
+              source={event.source}
               onView={() => event.supabaseId && navigate(`/events/${event.supabaseId}`)}
             />
           ))

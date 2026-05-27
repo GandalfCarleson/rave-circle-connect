@@ -1,5 +1,7 @@
 import { fetchAggregatedEvents, type AggregatedEvent } from '@/api/events/aggregate';
+import { curatedEvents, type CuratedEvent } from '@/data/curatedEvents';
 import { supabase } from '@/integrations/supabase/client';
+import { isRaveCircleRelevantEvent } from '@/lib/eventFiltering';
 import type { Enums, TablesInsert } from '@/integrations/supabase/types';
 
 type DateFilter = 'this_week' | 'next_week' | 'this_month' | 'this_year';
@@ -24,6 +26,9 @@ export type ExternalEvent = {
   eventType?: string;
   genres?: string[];
   source?: string;
+  sourceUrl?: string;
+  country?: string;
+  isCurated?: boolean;
   electronicScore?: number;
   lastFmTagged?: boolean;
 };
@@ -56,6 +61,21 @@ const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
   Amsterdam: { lat: 52.3676, lng: 4.9041 },
   Rotterdam: { lat: 51.9244, lng: 4.4777 },
   Prague: { lat: 50.0755, lng: 14.4378 },
+  Hilvarenbeek: { lat: 51.4858, lng: 5.1378 },
+  Biddinghuizen: { lat: 52.455, lng: 5.6931 },
+  Oisterwijk: { lat: 51.5792, lng: 5.1889 },
+  Uppsala: { lat: 59.8586, lng: 17.6389 },
+  Utrecht: { lat: 52.0907, lng: 5.1214 },
+  Cologne: { lat: 50.9375, lng: 6.9603 },
+  Antwerp: { lat: 51.2194, lng: 4.4025 },
+  Veggli: { lat: 60.041, lng: 9.15 },
+  Lapland: { lat: 66.166, lng: 29.151 },
+  Turku: { lat: 60.4518, lng: 22.2666 },
+  Weeze: { lat: 51.6026, lng: 6.1423 },
+  Kastellaun: { lat: 50.0692, lng: 7.4411 },
+  Saalburg: { lat: 50.5003, lng: 11.7337 },
+  Boom: { lat: 51.0876, lng: 4.3669 },
+  Essen: { lat: 51.4556, lng: 7.0116 },
 };
 
 const MAX_FALLBACK_CITIES = 3;
@@ -91,6 +111,18 @@ const endOfYear = (date: Date) => new Date(date.getFullYear(), 11, 31, 23, 59, 5
 
 const formatDateTime = (date: Date) => date.toISOString().replace(/\.\d{3}Z$/, 'Z');
 
+function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const radius = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return radius * c;
+}
+
 function getDateRange(filter?: DateFilter) {
   if (!filter) return null;
   const now = new Date();
@@ -125,6 +157,62 @@ function matchesTaste(event: ExternalEvent, preferredGenres: string[]) {
   if (eventGenres.some(g => normalizedPrefs.includes(g))) return true;
   const haystack = `${event.name} ${event.description || ''}`.toLowerCase();
   return normalizedPrefs.some(genre => haystack.includes(genre));
+}
+
+function matchesGenreFilter(event: ExternalEvent, genres?: string[]) {
+  if (!genres || genres.length === 0) return true;
+  const normalizedFilter = genres.map(genre => genre.toLowerCase());
+  return (event.genres || []).some(genre => normalizedFilter.includes(genre.toLowerCase()));
+}
+
+function toCuratedExternalEvent(event: CuratedEvent): ExternalEvent {
+  const coords = event.latitude != null && event.longitude != null
+    ? { lat: event.latitude, lng: event.longitude }
+    : CITY_COORDS[event.city];
+
+  return {
+    id: event.external_id,
+    externalId: event.external_id,
+    name: event.title,
+    description: event.description ?? (event.source_url ? `Curated by RaveCircle. Source: ${event.source_url}` : 'Curated by RaveCircle.'),
+    city: event.city,
+    venueName: event.venue,
+    startDateTime: event.start_date,
+    endDateTime: event.end_date,
+    latitude: coords?.lat,
+    longitude: coords?.lng,
+    minPrice: event.min_price ?? undefined,
+    ticketUrl: event.ticket_url ?? event.source_url,
+    imageUrl: event.image_url || '/demo-events/fallback-rave.jpg',
+    eventType: event.event_type,
+    genres: event.genres,
+    source: event.provider,
+    sourceUrl: event.source_url,
+    country: event.country,
+    isCurated: event.is_curated,
+  };
+}
+
+export function getCuratedEventByExternalId(externalId: string) {
+  const event = curatedEvents.find(item => item.external_id === externalId);
+  return event ? ensureExternalId(toCuratedExternalEvent(event)) : null;
+}
+
+function getCuratedExternalEvents(options: {
+  coords: { lat: number; lng: number };
+  radiusKm: number;
+  dateFilter?: DateFilter;
+  genres?: string[];
+}) {
+  return curatedEvents
+    .map(toCuratedExternalEvent)
+    .filter(event => matchesDateFilter(event, options.dateFilter))
+    .filter(event => matchesGenreFilter(event, options.genres))
+    .filter((event) => {
+      if (event.latitude == null || event.longitude == null) return false;
+      return calculateDistanceKm(options.coords.lat, options.coords.lng, event.latitude, event.longitude) <= options.radiusKm;
+    })
+    .map(ensureExternalId);
 }
 
 const inferEventType = (event: AggregatedEvent) => {
@@ -204,22 +292,50 @@ async function fetchExternalEvents(options: {
   }
 
   const range = getDateRange(options.dateFilter);
-  const response = await fetchAggregatedEvents({
-    lat: coords.lat,
-    lng: coords.lng,
-    radiusKm: options.radiusKm,
-    size: options.size,
-    page: options.page,
-    startDateTime: range ? formatDateTime(range.start) : undefined,
-    endDateTime: range ? formatDateTime(range.end) : undefined,
-    genres: options.genres,
-    electronicOnly: false,
-  });
+  const curated = (options.page ?? 0) === 0
+    ? getCuratedExternalEvents({
+      coords,
+      radiusKm: options.radiusKm,
+      dateFilter: options.dateFilter,
+      genres: options.genres,
+    })
+    : [];
 
-  const events = response.events
-    .map(toExternalEvent)
-    .filter((event): event is ExternalEvent => Boolean(event))
-    .map(ensureExternalId);
+  let response: Awaited<ReturnType<typeof fetchAggregatedEvents>>;
+  try {
+    response = await fetchAggregatedEvents({
+      lat: coords.lat,
+      lng: coords.lng,
+      radiusKm: options.radiusKm,
+      size: options.size,
+      page: options.page,
+      startDateTime: range ? formatDateTime(range.start) : undefined,
+      endDateTime: range ? formatDateTime(range.end) : undefined,
+      genres: options.genres,
+      electronicOnly: false,
+    });
+  } catch (error) {
+    if (curated.length === 0) throw error;
+    return {
+      events: curated,
+      page: options.page ?? 0,
+      size: options.size ?? 60,
+      totalPages: 1,
+      totalElements: curated.length,
+      source: 'aggregate+curated',
+      notice: 'Live event sources are temporarily unavailable. Showing RaveCircle Picks.',
+      hasMore: false,
+    };
+  }
+
+  const events = [
+    ...curated,
+    ...response.events
+      .filter(isRaveCircleRelevantEvent)
+      .map(toExternalEvent)
+      .filter((event): event is ExternalEvent => Boolean(event))
+      .map(ensureExternalId),
+  ];
 
   const filteredByDate = options.dateFilter
     ? events.filter(event => matchesDateFilter(event, options.dateFilter))
@@ -230,8 +346,8 @@ async function fetchExternalEvents(options: {
     page: response.page,
     size: response.size,
     totalPages: response.hasMore ? (response.page + 2) : (response.page + 1),
-    totalElements: response.hasMore ? ((response.page + 1) * response.size) + 1 : ((response.page + 1) * response.size),
-    source: 'aggregate',
+    totalElements: response.hasMore ? ((response.page + 1) * response.size) + curated.length + 1 : ((response.page + 1) * response.size) + curated.length,
+    source: curated.length > 0 ? 'aggregate+curated' : 'aggregate',
     notice: response.notice,
     hasMore: response.hasMore,
   };
@@ -241,11 +357,27 @@ export async function ensureSupabaseEvents(events: ExternalEvent[]) {
   if (events.length === 0) return events;
   const now = Date.now();
   const withExternalId = events.map(event => ({ ...event, externalId: event.externalId || event.id }));
+  const unresolvedEvents = withExternalId.filter(event => !event.supabaseId);
+  const externalIds = Array.from(new Set(unresolvedEvents.map(event => event.externalId || event.id)));
+  const idByExternal = new Map<string, string>();
+
+  // Resolve already-known events first so action buttons can work even if inserts are blocked.
+  if (externalIds.length > 0) {
+    const { data: existingRows } = await supabase
+      .from('events')
+      .select('id, external_id')
+      .in('external_id', externalIds);
+    (existingRows || []).forEach((row) => {
+      if (row.external_id) {
+        idByExternal.set(row.external_id, row.id);
+      }
+    });
+  }
 
   const toUpsertByExternalId = new Map<string, ExternalEvent>();
-  for (const event of withExternalId) {
-    if (event.supabaseId) continue;
+  for (const event of unresolvedEvents) {
     const externalId = event.externalId || event.id;
+    if (idByExternal.has(externalId)) continue;
     const cooldownUntil = upsertCooldownByExternalId.get(externalId) ?? 0;
     if (cooldownUntil > now) continue;
     if (!toUpsertByExternalId.has(externalId)) {
@@ -254,23 +386,15 @@ export async function ensureSupabaseEvents(events: ExternalEvent[]) {
   }
 
   if (toUpsertByExternalId.size === 0) {
-    return withExternalId;
+    return withExternalId.map(event => ({
+      ...event,
+      externalId: event.externalId || event.id,
+      supabaseId: idByExternal.get(event.externalId || event.id) || event.supabaseId,
+      source: event.source || 'external',
+    }));
   }
 
   const toUpsert = Array.from(toUpsertByExternalId.values());
-  const externalIds = toUpsert.map(event => event.externalId || event.id);
-  const idByExternal = new Map<string, string>();
-
-  // Resolve already-known events first so action buttons can work even if inserts are blocked.
-  const { data: existingRows } = await supabase
-    .from('events')
-    .select('id, external_id')
-    .in('external_id', externalIds);
-  (existingRows || []).forEach((row) => {
-    if (row.external_id) {
-      idByExternal.set(row.external_id, row.id);
-    }
-  });
 
   try {
     const payload: EventsInsert[] = toUpsert
