@@ -15,6 +15,10 @@
     "android:init": "tauri android init",
     "android:dev": "tauri android dev",
     "android:build": "tauri android build",
+    "android:build:arm64": "powershell -ExecutionPolicy Bypass -File scripts/build-android-arm64.ps1",
+    "android:build:arm64:release": "powershell -ExecutionPolicy Bypass -File scripts/build-android-arm64.ps1 -Profile release",
+    "android:install:arm64": "powershell -ExecutionPolicy Bypass -File scripts/install-android-arm64.ps1",
+    "android:install:arm64:skip-build": "powershell -ExecutionPolicy Bypass -File scripts/install-android-arm64.ps1 -SkipBuild",
     "ios:dev": "tauri ios dev",
     "ios:build": "tauri ios build",
     "deploy:functions": "supabase functions deploy delete-account --no-verify-jwt && supabase functions deploy cleanup-retracted-messages --no-verify-jwt && supabase functions deploy tickster-events --no-verify-jwt && supabase functions deploy ticketmaster-events --no-verify-jwt && supabase functions deploy events-aggregate"
