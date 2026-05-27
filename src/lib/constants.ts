@@ -5,15 +5,14 @@ export const GENRES = [
   'Trance',
   'EDM',
   'Hardstyle',
+  'Hard-Techno',
+  'Hardcore',
   'Dubstep',
-  'Minimal',
-  'Progressive',
   'Psytrance',
-  'Ambient',
   'Industrial',
 ] as const;
 
-export const EVENT_TYPES = ['festival', 'club', 'rave', 'concert'] as const;
+export const EVENT_TYPES = ['festival', 'club', 'rave'] as const;
 
 export const RADIUS_OPTIONS = [
   { value: 100, label: 'Local', display: 'Local · 100 km' },

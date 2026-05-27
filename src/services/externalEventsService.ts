@@ -34,9 +34,9 @@ export type ExternalEvent = {
 };
 
 const PRIORITY_CITIES = [
+  'Malm\u00F6',
   'Stockholm',
   'Gothenburg',
-  'Malmö',
   'Copenhagen',
   'Oslo',
   'Helsinki',
@@ -49,9 +49,10 @@ const PRIORITY_CITIES = [
 ] as const;
 
 const CITY_COORDS: Record<string, { lat: number; lng: number }> = {
+  'Malm\u00F6': { lat: 55.605, lng: 13.0038 },
+  Malmo: { lat: 55.605, lng: 13.0038 },
   Stockholm: { lat: 59.3293, lng: 18.0686 },
   Gothenburg: { lat: 57.7089, lng: 11.9746 },
-  Malmö: { lat: 55.605, lng: 13.0038 },
   Copenhagen: { lat: 55.6761, lng: 12.5683 },
   Oslo: { lat: 59.9139, lng: 10.7522 },
   Helsinki: { lat: 60.1699, lng: 24.9384 },
@@ -90,8 +91,7 @@ const resolveCoords = (city?: string, latitude?: number, longitude?: number) => 
   if (city && CITY_COORDS[city]) {
     return CITY_COORDS[city];
   }
-  const fallbackCity = PRIORITY_CITIES[0];
-  return CITY_COORDS[fallbackCity] ?? null;
+  return CITY_COORDS['Malm\u00F6'];
 };
 
 const ensureExternalId = (event: ExternalEvent) => ({
@@ -312,7 +312,7 @@ async function fetchExternalEvents(options: {
       startDateTime: range ? formatDateTime(range.start) : undefined,
       endDateTime: range ? formatDateTime(range.end) : undefined,
       genres: options.genres,
-      electronicOnly: false,
+      electronicOnly: true,
     });
   } catch (error) {
     if (curated.length === 0) throw error;
@@ -331,9 +331,9 @@ async function fetchExternalEvents(options: {
   const events = [
     ...curated,
     ...response.events
-      .filter(isRaveCircleRelevantEvent)
       .map(toExternalEvent)
       .filter((event): event is ExternalEvent => Boolean(event))
+      .filter(isRaveCircleRelevantEvent)
       .map(ensureExternalId),
   ];
 

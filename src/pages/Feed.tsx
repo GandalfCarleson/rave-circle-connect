@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, memo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Settings2, Calendar, Filter, MapPin, Compass, RefreshCw } from 'lucide-react';
+import { Settings2, Filter, MapPin, Compass, RefreshCw, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EventCard } from '@/components/EventCard';
 import { GenreChip } from '@/components/GenreChip';
@@ -39,6 +39,12 @@ interface Group {
 }
 
 const MemoEventCard = memo(EventCard);
+const DEFAULT_DEMO_PROFILE: Profile = {
+  city: 'Malm\u00F6',
+  radius_km: 1500,
+  latitude: null,
+  longitude: null,
+};
 
 // Haversine formula to calculate distance between two points
 function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -59,7 +65,7 @@ export default function Feed() {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [expandingSearch, setExpandingSearch] = useState(false);
-  const [profile, setProfile] = useState<Profile>({ city: null, radius_km: 100, latitude: null, longitude: null });
+  const [profile, setProfile] = useState<Profile>(DEFAULT_DEMO_PROFILE);
   const [preferredGenres, setPreferredGenres] = useState<string[]>([]);
   const [selectedGenres, setSelectedGenres] = useState<string[]>([]);
   const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
@@ -70,6 +76,7 @@ export default function Feed() {
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [userGroups, setUserGroups] = useState<Group[]>([]);
   const [locationStatus, setLocationStatus] = useState<'unknown' | 'granted' | 'denied'>('unknown');
+  const [isLocating, setIsLocating] = useState(false);
   const [matchedEvents, setMatchedEvents] = useState<ExternalEvent[]>([]);
   const [suggestedEvents, setSuggestedEvents] = useState<ExternalEvent[]>([]);
   const [interestedEvents, setInterestedEvents] = useState<Set<string>>(new Set());
@@ -81,6 +88,7 @@ export default function Feed() {
   const [notice, setNotice] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const loadMoreInFlightRef = useRef(false);
+  const locationRequestInFlightRef = useRef(false);
 
   useEffect(() => {
     if (import.meta.env.DEV) {
@@ -100,44 +108,70 @@ export default function Feed() {
   }, [user, authLoading, navigate]);
 
   const requestLocation = useCallback(async () => {
-    if (!user || !navigator.geolocation) {
+    if (!user || locationRequestInFlightRef.current) return;
+
+    if (!navigator.geolocation) {
       setLocationStatus('denied');
+      toast({
+        title: 'Location unavailable',
+        description: `Using ${profile.city || DEFAULT_DEMO_PROFILE.city} and ${currentRadiusOption.label} instead.`,
+        variant: 'destructive',
+      });
       return;
     }
     if (!window.isSecureContext) {
       setLocationStatus('denied');
       toast({
         title: 'Location unavailable',
-        description: 'Use https:// or localhost to allow browser location access.',
+        description: `Android WebView blocked location. Using ${profile.city || DEFAULT_DEMO_PROFILE.city} instead.`,
         variant: 'destructive',
       });
       return;
     }
 
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        setLocationStatus('granted');
-        const { latitude, longitude } = position.coords;
-        
-        // Update profile with coordinates
-        await supabase
-          .from('profiles')
-          .update({ latitude, longitude })
-          .eq('user_id', user.id);
-        
-        setProfile(prev => ({ ...prev, latitude, longitude }));
-      },
-      (error) => {
-        setLocationStatus('denied');
-        toast({
-          title: 'Location blocked',
-          description: error.message || 'Enable location permissions in your browser settings.',
-          variant: 'destructive',
+    locationRequestInFlightRef.current = true;
+    setIsLocating(true);
+
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: false,
+          timeout: 8000,
+          maximumAge: 5 * 60 * 1000,
         });
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 },
-    );
-  }, [toast, user]);
+      });
+
+      const { latitude, longitude } = position.coords;
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        throw new Error('No valid coordinates were returned.');
+      }
+
+      const { error } = await supabase
+        .from('profiles')
+        .update({ latitude, longitude })
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      setLocationStatus('granted');
+      setProfile(prev => ({ ...prev, latitude, longitude }));
+      toast({
+        title: 'Location updated',
+        description: 'Using your current location for radius matching.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Location permission was denied or timed out.';
+      setLocationStatus('denied');
+      toast({
+        title: 'Location not available',
+        description: `${message} Using ${profile.city || DEFAULT_DEMO_PROFILE.city} and ${currentRadiusOption.label} instead.`,
+        variant: 'destructive',
+      });
+    } finally {
+      locationRequestInFlightRef.current = false;
+      setIsLocating(false);
+    }
+  }, [currentRadiusOption.label, profile.city, toast, user]);
 
   const fetchProfile = useCallback(async () => {
     if (!user) return;
@@ -150,8 +184,13 @@ export default function Feed() {
     if (data) {
       const radiusValue = RADIUS_OPTIONS.some(option => option.value === data.radius_km)
         ? data.radius_km
-        : RADIUS_OPTIONS[0].value;
-      setProfile({ ...data, radius_km: radiusValue });
+        : DEFAULT_DEMO_PROFILE.radius_km;
+      setProfile({
+        city: data.city || DEFAULT_DEMO_PROFILE.city,
+        latitude: data.latitude,
+        longitude: data.longitude,
+        radius_km: radiusValue,
+      });
     }
   }, [user]);
 
@@ -420,11 +459,20 @@ export default function Feed() {
 
   const updateRadius = async (radius: number) => {
     if (!user) return;
+    const previousRadius = profile.radius_km;
     setProfile(prev => ({ ...prev, radius_km: radius }));
-    await supabase
+    const { error } = await supabase
       .from('profiles')
       .update({ radius_km: radius })
       .eq('user_id', user.id);
+    if (error) {
+      setProfile(prev => ({ ...prev, radius_km: previousRadius }));
+      toast({
+        title: 'Could not update radius',
+        description: error.message,
+        variant: 'destructive',
+      });
+    }
   };
 
   const toggleGenre = (genre: string) => {
@@ -452,11 +500,12 @@ export default function Feed() {
   };
 
   const getMatchReason = (event: ExternalEvent, matchedByGenre: boolean) => {
+    if (event.isCurated) return 'RaveCircle Pick';
     if (matchedByGenre) return 'Matched because of genre';
     if (profile.latitude != null && profile.longitude != null && event.latitude != null && event.longitude != null) {
       return 'Matched because of location/radius';
     }
-    return 'Suggested because of date/proximity';
+    return 'Matched because of genre';
   };
 
   const filteredMatched = matchedEvents.filter(eventMatchesFilters);
@@ -513,10 +562,14 @@ export default function Feed() {
   const visibleSuggested = sortedSuggested.filter(event => visibleEvents.includes(event));
 
   useEffect(() => {
+    const scrollParent = document.querySelector('.app-shell__content');
     const handleScroll = () => {
       if (loading || isLoadingMore || loadMoreInFlightRef.current) return;
-      const scrollPosition = window.innerHeight + window.scrollY;
-      const threshold = document.body.offsetHeight - 300;
+      const scrollTop = scrollParent ? scrollParent.scrollTop : window.scrollY;
+      const viewportHeight = scrollParent ? scrollParent.clientHeight : window.innerHeight;
+      const scrollHeight = scrollParent ? scrollParent.scrollHeight : document.body.offsetHeight;
+      const scrollPosition = viewportHeight + scrollTop;
+      const threshold = scrollHeight - 300;
       if (scrollPosition < threshold) return;
 
       if (visibleCount < orderedEvents.length) {
@@ -530,8 +583,9 @@ export default function Feed() {
       }
     };
 
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    const eventTarget = scrollParent || window;
+    eventTarget.addEventListener('scroll', handleScroll);
+    return () => eventTarget.removeEventListener('scroll', handleScroll);
   }, [fetchEvents, hasMore, isLoadingMore, loading, orderedEvents.length, page, visibleCount]);
 
   const handleShare = (event: ExternalEvent) => {
@@ -720,20 +774,33 @@ export default function Feed() {
   if (authLoading) {
     return (
       <div className="min-h-screen gradient-bg flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+        <img
+          src="/icon-192.png"
+          alt="RaveCircle"
+          className="h-16 w-16 animate-pulse object-contain"
+          draggable={false}
+        />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen gradient-bg">
+    <div className="mobile-page gradient-bg">
       <AnimatedBackground />
       
       {/* Header */}
-      <div className="sticky top-0 z-40 glass border-b border-border/50">
+      <div className="mobile-page__header glass border-b border-border/50">
         <div className="max-w-lg mx-auto px-4 py-4">
           <div className="flex items-center justify-between mb-4">
-            <h1 className="text-xl font-display font-bold">Feed</h1>
+            <div className="flex items-center gap-2">
+              <img
+                src="/icon-192.png"
+                alt="RaveCircle"
+                className="h-8 w-8 object-contain"
+                draggable={false}
+              />
+              <h1 className="text-xl font-display font-bold">Feed</h1>
+            </div>
             <div className="flex items-center gap-2">
               <Button
                 variant="ghost"
@@ -781,10 +848,11 @@ export default function Feed() {
           <button
             type="button"
             onClick={requestLocation}
+            disabled={isLocating}
             className="flex w-full items-center gap-2 text-sm text-muted-foreground mb-4 hover:text-foreground transition-colors"
             title="Use current location"
           >
-            <MapPin className="w-4 h-4" />
+            {isLocating ? <Loader2 className="w-4 h-4 animate-spin" /> : <MapPin className="w-4 h-4" />}
             {profile.city ? (
               <>
                 <span className="text-primary font-medium">{profile.city}</span>
@@ -795,7 +863,7 @@ export default function Feed() {
               <span className="text-primary font-medium">{currentRadiusOption.display}</span>
             )}
             <span className="ml-auto rounded-full border border-border/60 px-2 py-0.5 text-xs text-foreground">
-              Use my location
+              {isLocating ? 'Locating...' : 'Use my location'}
             </span>
           </button>
 
@@ -854,7 +922,7 @@ export default function Feed() {
       )}
 
       {/* Events Grid */}
-      <div className="max-w-lg mx-auto px-4 relative z-10">
+      <div className="mobile-page__content max-w-lg mx-auto px-4 relative z-10">
         {loading ? (
           <div className="space-y-4">
             {[1, 2, 3].map(i => (
@@ -884,8 +952,8 @@ export default function Feed() {
             </p>
             <div className="flex flex-col gap-2 items-center">
               {visibleEvents.length === 0 && selectedGenres.length === 0 && selectedTypes.length === 0 && !selectedDate ? (
-                <Button variant="neon-outline" onClick={requestLocation}>
-                  Use my location
+                <Button variant="neon-outline" onClick={requestLocation} disabled={isLocating}>
+                  {isLocating ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Use my location'}
                 </Button>
               ) : (
                 <Button variant="neon-outline" onClick={() => {

@@ -7,6 +7,9 @@ export type EventFilteringInput = {
   city?: string | null;
   eventType?: string | null;
   source?: string | null;
+  sourceId?: string | null;
+  providerCategory?: string | null;
+  category?: string | null;
   isCurated?: boolean | null;
   genres?: Array<string | null | undefined> | null;
   tags?: Array<string | null | undefined> | null;
@@ -21,8 +24,6 @@ export const RAVECIRCLE_ALLOWED_EVENT_TERMS = [
   'dance',
   'edm',
   'techno',
-  'hard dance',
-  'hard-dance',
   'hard techno',
   'hard-techno',
   'house',
@@ -31,8 +32,8 @@ export const RAVECIRCLE_ALLOWED_EVENT_TERMS = [
   'tech-house',
   'trance',
   'hardstyle',
-  'hardcore',
   'rawstyle',
+  'hardcore',
   'uptempo',
   'gabber',
   'rave',
@@ -43,23 +44,22 @@ export const RAVECIRCLE_ALLOWED_EVENT_TERMS = [
   'dubstep',
   'psytrance',
   'melodic techno',
+  'industrial',
+  'industrial techno',
   'warehouse',
   'club',
   'club night',
   'nightclub',
+  'dj',
 ] as const;
 
 export const RAVECIRCLE_DENIED_EVENT_TERMS = [
   'jazz',
+  'rock',
+  'alt rock',
+  'alternative',
   'indie',
-  'acoustic',
-  'folk',
-  'country',
-  'singer-songwriter',
-  'singer songwriter',
-  'classical',
-  'opera',
-  'musical',
+  'pop',
   'hip hop',
   'hip-hop',
   'hiphop',
@@ -68,13 +68,64 @@ export const RAVECIRCLE_DENIED_EVENT_TERMS = [
   'r&b',
   'soul',
   'blues',
-  'latin',
+  'folk',
+  'country',
+  'classical',
+  'opera',
+  'musical',
+  'museum',
+  'museet',
+  'entrance',
+  'entry ticket',
+  'ticket pass',
+  'annual pass',
+  'season pass',
+  'membership',
+  'medlemskap',
+  'presentkort',
+  'gift card',
+  'basket',
+  'basketball',
+  'sport',
+  'sports',
+  'football',
+  'hockey',
+  'theatre',
+  'theater',
   'stand-up',
   'stand up',
   'comedy',
+  'family',
+  'children',
+  'kids',
 ] as const;
 
-const GENERIC_MUSIC_TERMS = ['music', 'concert', 'live music', 'show'] as const;
+const STRONG_ALLOWED_TERMS = [
+  'techno',
+  'hard techno',
+  'hard-techno',
+  'house',
+  'deep house',
+  'tech house',
+  'trance',
+  'hardstyle',
+  'rawstyle',
+  'hardcore',
+  'uptempo',
+  'gabber',
+  'rave',
+  'drum and bass',
+  'drum & bass',
+  'dnb',
+  'dubstep',
+  'psytrance',
+  'melodic techno',
+  'industrial techno',
+  'warehouse rave',
+  'dj set',
+] as const;
+
+const GENERIC_MUSIC_TERMS = ['music', 'concert', 'live music', 'show', 'event', 'tickets'] as const;
 
 const normalizeText = (value: string) =>
   value
@@ -97,6 +148,7 @@ const termToRegex = (term: string) => {
 
 const allowedRegexes = RAVECIRCLE_ALLOWED_EVENT_TERMS.map(termToRegex);
 const deniedRegexes = RAVECIRCLE_DENIED_EVENT_TERMS.map(termToRegex);
+const strongAllowedRegexes = STRONG_ALLOWED_TERMS.map(termToRegex);
 const genericMusicRegexes = GENERIC_MUSIC_TERMS.map(termToRegex);
 
 const compactText = (values: Array<string | null | undefined>) =>
@@ -119,18 +171,21 @@ export function isRaveCircleRelevantEvent(event: EventFilteringInput) {
     event.venue,
     event.city,
     event.eventType,
+    event.source,
+    event.sourceId,
+    event.providerCategory,
+    event.category,
     compactList(event.tags),
     compactList(event.categories),
     compactList(event.artists),
   ]);
   const searchableText = `${genreText} ${metadataText}`.trim();
-  const hasScoredElectronicSignal = event.lastFmTagged || (event.electronicScore ?? 0) >= 2;
-  const hasAllowedSignal = hasScoredElectronicSignal || hasAny(searchableText, allowedRegexes);
+  const scoredElectronic = event.lastFmTagged || (event.electronicScore ?? 0) >= 2;
+  const hasAllowedSignal = scoredElectronic || hasAny(searchableText, allowedRegexes);
+  const hasStrongAllowedSignal = scoredElectronic || hasAny(searchableText, strongAllowedRegexes);
 
   if (!hasAllowedSignal) return false;
+  if (hasAny(searchableText, deniedRegexes) && !hasStrongAllowedSignal) return false;
 
-  const hasDeniedSignal = hasAny(searchableText, deniedRegexes);
-  if (hasDeniedSignal) return false;
-
-  return !hasAny(searchableText, genericMusicRegexes) || hasAllowedSignal;
+  return !hasAny(searchableText, genericMusicRegexes) || hasStrongAllowedSignal;
 }
