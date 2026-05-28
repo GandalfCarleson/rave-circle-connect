@@ -12,6 +12,8 @@ settingGroups:
     base:
       PRODUCT_NAME: RaveCircle
       PRODUCT_BUNDLE_IDENTIFIER: app.ravecircle.mobile
+      CODE_SIGN_STYLE: Automatic
+      DEVELOPMENT_TEAM: NKJ8W74Z5X
 targetTemplates:
   app:
     type: application
@@ -30,7 +32,6 @@ targets:
     sources:
       - path: Sources
       - path: Assets.xcassets
-      - path: Externals
       - path: rave-circle_iOS
       - path: assets
         buildPhase: resources
@@ -41,6 +42,7 @@ targets:
       properties:
         LSRequiresIPhoneOS: true
         NSLocationWhenInUseUsageDescription: RaveCircle uses your location to show nearby events.
+        NSLocalNetworkUsageDescription: RaveCircle needs local network access to connect to the development server during testing.
         UILaunchStoryboardName: LaunchScreen
         UIRequiredDeviceCapabilities: [arm64, metal]
         UISupportedInterfaceOrientations:
@@ -82,7 +84,109 @@ targets:
       - sdk: UIKit.framework
       - sdk: WebKit.framework
     preBuildScripts:
-      - script: npm run -- tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
+      - script: |
+          set -e
+
+          export PATH="$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+
+          _ensure_tool_in_path() {
+            _tool_name="$1"
+            shift
+            for _bin_dir in "$@"; do
+              [ -n "${_bin_dir}" ] || continue
+              if [ -x "${_bin_dir}/${_tool_name}" ]; then
+                export PATH="${_bin_dir}:$PATH"
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          _CURRENT_USER="$(/usr/bin/id -un)"
+          _USER_HOME="$(/usr/bin/dscl . -read "/Users/${_CURRENT_USER}" NFSHomeDirectory 2>/dev/null | /usr/bin/awk '{print $2}')"
+          [ -n "${_USER_HOME}" ] || _USER_HOME="$HOME"
+
+          if ! command -v node >/dev/null 2>&1; then
+            _ensure_tool_in_path "node" "/opt/homebrew/bin" "/usr/local/bin" || true
+          fi
+
+          if ! command -v node >/dev/null 2>&1; then
+            echo "error: node not found in PATH for Xcode script phase."
+            echo "error: PATH=$PATH"
+            exit 1
+          fi
+
+          if ! command -v npm >/dev/null 2>&1; then
+            _ensure_tool_in_path "npm" "/opt/homebrew/bin" "/usr/local/bin" || true
+          fi
+
+          if ! command -v npm >/dev/null 2>&1; then
+            echo "error: npm not found in PATH for Xcode script phase."
+            echo "error: PATH=$PATH"
+            exit 1
+          fi
+
+          _tauri_log="$(mktemp)"
+          set +e
+          npm run -- tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR:-} ${ARCHS:?} >"${_tauri_log}" 2>&1
+          _tauri_status=$?
+          set -e
+          cat "${_tauri_log}"
+
+          if [ "${_tauri_status}" -eq 0 ]; then
+            exit 0
+          fi
+
+          if ! /usr/bin/grep -Eq "failed to read CLI options|Connection refused|TAURI_OPTIONS_SERVER_ADDR" "${_tauri_log}"; then
+            exit "${_tauri_status}"
+          fi
+
+          echo "warn: falling back to direct cargo build for Xcode script phase"
+
+          if ! command -v cargo >/dev/null 2>&1; then
+            _ensure_tool_in_path "cargo" "${_USER_HOME}/.cargo/bin" "$HOME/.cargo/bin" "/opt/homebrew/bin" "/usr/local/bin" || true
+          fi
+
+          if ! command -v cargo >/dev/null 2>&1; then
+            echo "error: cargo not found in PATH and tauri xcode bridge unavailable."
+            echo "error: Install Rust with 'rustup toolchain install stable' and reopen Xcode."
+            echo "error: PATH=$PATH"
+            exit 1
+          fi
+
+          _cfg_lc="$(echo "${CONFIGURATION:?}" | tr '[:upper:]' '[:lower:]')"
+
+          for _arch in ${ARCHS:?}; do
+            case "${_arch}" in
+              arm64)
+                if [ "${PLATFORM_NAME:-}" = "iphonesimulator" ]; then
+                  _target="aarch64-apple-ios-sim"
+                else
+                  _target="aarch64-apple-ios"
+                fi
+                ;;
+              x86_64)
+                _target="x86_64-apple-ios"
+                ;;
+              *)
+                echo "error: unsupported ARCHS entry '${_arch}' for fallback build"
+                exit 1
+                ;;
+            esac
+
+            _release_flag=""
+            if [ "${_cfg_lc}" = "release" ]; then
+              _release_flag="--release"
+            fi
+
+            cargo build --manifest-path ../../Cargo.toml --target "${_target}" ${_release_flag}
+
+            _src="../../target/${_target}/${_cfg_lc}/librave_circle_lib.a"
+            _dst_dir="./Externals/${_arch}/${_cfg_lc}"
+            _dst="${_dst_dir}/libapp.a"
+            /bin/mkdir -p "${_dst_dir}"
+            /bin/cp "${_src}" "${_dst}"
+          done
         name: Build Rust Code
         basedOnDependencyAnalysis: false
         outputFiles:

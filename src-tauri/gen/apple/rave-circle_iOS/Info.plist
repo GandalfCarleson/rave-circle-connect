@@ -20,6 +20,8 @@
 	<string>0.1.0</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>RaveCircle needs local network access to connect to the development server during testing.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>RaveCircle uses your location to show nearby events.</string>
 	<key>UILaunchStoryboardName</key>
