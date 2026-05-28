@@ -48,6 +48,9 @@ export default function Auth() {
   } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const demoEmail = import.meta.env.DEV ? import.meta.env.VITE_DEMO_EMAIL : undefined;
+  const demoPassword = import.meta.env.DEV ? import.meta.env.VITE_DEMO_PASSWORD : undefined;
+  const hasDemoCredentials = Boolean(demoEmail && demoPassword);
 
   useEffect(() => {
     if (user) {
@@ -155,6 +158,7 @@ export default function Auth() {
   };
 
   const handleUseLocation = () => {
+    if (locating) return;
     if (!navigator.geolocation) {
       setErrors(prev => ({ ...prev, location: 'Geolocation is not supported by your browser' }));
       return;
@@ -199,6 +203,11 @@ export default function Auth() {
       () => {
         setErrors(prev => ({ ...prev, location: 'Unable to access your location. Please enter your city.' }));
         setLocating(false);
+      },
+      {
+        enableHighAccuracy: false,
+        timeout: 8000,
+        maximumAge: 5 * 60 * 1000,
       }
     );
   };
@@ -231,6 +240,20 @@ export default function Auth() {
       description: 'We sent a password reset link to your email.',
     });
     setShowReset(false);
+  };
+
+  const fillDemoCredentials = () => {
+    if (!hasDemoCredentials) return;
+    setMode('login');
+    setSignupStep('account');
+    setShowReset(false);
+    setEmail(demoEmail);
+    setPassword(demoPassword);
+    setErrors({});
+    toast({
+      title: 'Demo account ready',
+      description: 'Login still uses Supabase and a real session.',
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -457,10 +480,25 @@ export default function Auth() {
             >
               {isDevMode ? 'Disable Dev Mode' : 'Enable Dev Mode'}
             </button>
+            {isDevMode && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Dev Mode only previews local auth/profile. Use a real demo account for events and crews.
+              </p>
+            )}
           </div>
         )}
         {/* Auth Card */}
         <div className="card-neon rounded-2xl border border-border/50 p-6 backdrop-blur-xl">
+          {hasDemoCredentials && !isDevMode && (
+            <Button
+              type="button"
+              variant="outline"
+              className="mb-4 w-full"
+              onClick={fillDemoCredentials}
+            >
+              Use Demo Account
+            </Button>
+          )}
           {/* Mode Toggle - Only show for step 1 */}
           {(mode === 'login' || signupStep === 'account') && (
             <div className="flex bg-muted rounded-lg p-1 mb-6">

@@ -11,6 +11,7 @@ import { useToast } from '@/hooks/use-toast';
 import { ensureSupabaseEvents, getCuratedEventByExternalId, type ExternalEvent } from '@/services/externalEventsService';
 import { getEventTicketUrl } from '@/lib/eventLinks';
 import { openExternalUrl } from '@/lib/openExternal';
+import { blockDevModeWrite } from '@/lib/demoMode';
 import {
   Dialog,
   DialogContent,
@@ -65,7 +66,7 @@ const toDetailEvent = (event: ExternalEvent): Event => ({
 
 export default function EventDetail() {
   const { id } = useParams<{ id: string }>();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, isDevMode } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
@@ -208,6 +209,7 @@ export default function EventDetail() {
 
   const shareToGroup = async () => {
     if (!user || !event || !selectedGroupId) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     const { error } = await supabase
       .from('messages')
       .insert({
@@ -237,6 +239,7 @@ export default function EventDetail() {
 
   const updateStatus = async (newStatus: 'going' | 'interested') => {
     if (!user || !event) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
 
     const isTogglingOff = status === newStatus;
     if (isTogglingOff) {

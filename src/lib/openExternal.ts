@@ -26,10 +26,11 @@ export async function openExternalUrl(url: string | null | undefined) {
       await openUrl(normalizedUrl);
       return true;
     } catch (error) {
-      console.warn('[external-link] Tauri opener failed, falling back to browser tab', {
+      console.warn('[external-link] Tauri opener failed', {
         url: normalizedUrl,
         error,
       });
+      return false;
     }
   }
 

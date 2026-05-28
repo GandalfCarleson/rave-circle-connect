@@ -9,9 +9,18 @@ interface AvatarUploadProps {
   currentAvatarUrl?: string | null;
   onUpload: (url: string) => void;
   size?: 'sm' | 'md' | 'lg';
+  disabled?: boolean;
+  disabledMessage?: string;
 }
 
-export function AvatarUpload({ userId, currentAvatarUrl, onUpload, size = 'lg' }: AvatarUploadProps) {
+export function AvatarUpload({
+  userId,
+  currentAvatarUrl,
+  onUpload,
+  size = 'lg',
+  disabled = false,
+  disabledMessage,
+}: AvatarUploadProps) {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -23,6 +32,16 @@ export function AvatarUpload({ userId, currentAvatarUrl, onUpload, size = 'lg' }
   };
 
   const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (disabled) {
+      if (disabledMessage) {
+        toast({
+          title: 'Upload unavailable',
+          description: disabledMessage,
+        });
+      }
+      event.target.value = '';
+      return;
+    }
     try {
       setUploading(true);
 
@@ -102,7 +121,16 @@ export function AvatarUpload({ userId, currentAvatarUrl, onUpload, size = 'lg' }
         className="hidden"
       />
       <button
-        onClick={() => fileInputRef.current?.click()}
+        onClick={() => {
+          if (disabled) {
+            toast({
+              title: 'Upload unavailable',
+              description: disabledMessage || 'Avatar upload is unavailable right now.',
+            });
+            return;
+          }
+          fileInputRef.current?.click();
+        }}
         disabled={uploading}
         className={cn(
           'relative rounded-2xl overflow-hidden bg-gradient-to-br from-primary/30 to-accent/30 flex items-center justify-center transition-all',

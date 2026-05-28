@@ -40,6 +40,7 @@ targets:
       path: rave-circle_iOS/Info.plist
       properties:
         LSRequiresIPhoneOS: true
+        NSLocationWhenInUseUsageDescription: RaveCircle uses your location to show nearby events.
         UILaunchStoryboardName: LaunchScreen
         UIRequiredDeviceCapabilities: [arm64, metal]
         UISupportedInterfaceOrientations:

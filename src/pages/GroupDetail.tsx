@@ -23,6 +23,7 @@ import {
   unpinCrewEvent,
 } from '@/services/crewEventsService';
 import type { ExternalEvent } from '@/services/externalEventsService';
+import { blockDevModeWrite } from '@/lib/demoMode';
 
 interface Group {
   id: string;
@@ -144,7 +145,7 @@ const getDisplayName = (user: { email?: string; user_metadata?: { name?: string 
 export default function GroupDetail() {
   const { id } = useParams<{ id: string }>();
   const groupId = id && id !== 'undefined' ? id : null;
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, isDevMode } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
   const [group, setGroup] = useState<Group | null>(null);
@@ -297,6 +298,7 @@ export default function GroupDetail() {
 
   const toggleReaction = async (messageId: string, emoji: string) => {
     if (!user) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     if (!isSingleEmoji(emoji)) {
       toast({ title: 'Invalid reaction', description: 'Please select a valid emoji.' });
       return;
@@ -430,6 +432,7 @@ export default function GroupDetail() {
 
   const removeEventFromCrew = async (message: Message) => {
     if (!groupId || !message.attached_event_id) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     await removeCrewEventFromCrew(groupId, message.attached_event_id);
     refreshCrewPins(messageEventIdsRef.current);
     toast({ title: 'Event removed from crew' });
@@ -524,6 +527,7 @@ export default function GroupDetail() {
 
   const saveEdit = async (message: Message) => {
     if (!editText.trim() || message.retracted_at) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     const { error } = await supabase
       .from('messages')
       .update({
@@ -547,6 +551,7 @@ export default function GroupDetail() {
 
   const handleRetract = async (message: Message) => {
     if (!user) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     const now = new Date();
     const ttlSeconds = getRetractTtlSeconds();
     const expiresAt = new Date(now.getTime() + ttlSeconds * 1000).toISOString();
@@ -615,7 +620,7 @@ export default function GroupDetail() {
   }, [groupId]);
 
   const updateReadReceipt = useCallback(async () => {
-    if (!user || !groupId || messages.length === 0) return;
+    if (!user || !groupId || isDevMode || messages.length === 0) return;
     const lastMessage = messages[messages.length - 1];
     if (!lastMessage) return;
     await supabase
@@ -626,10 +631,10 @@ export default function GroupDetail() {
         last_read_message_id: lastMessage.id,
         last_read_at: new Date().toISOString(),
       });
-  }, [groupId, messages, user]);
+  }, [groupId, isDevMode, messages, user]);
 
   const refreshCrewPins = useCallback(async (eventIds: string[]) => {
-    if (!user || !groupId) return;
+    if (!user || !groupId || isDevMode) return;
     if (eventIds.length === 0) {
       setCrewPinCounts({});
       setCrewPinNames({});
@@ -662,15 +667,15 @@ export default function GroupDetail() {
       namesByEvent[pin.event_id].push(nameByUser.get(pin.user_id) || 'Someone');
     });
     setCrewPinNames(namesByEvent);
-  }, [groupId, user]);
+  }, [groupId, isDevMode, user]);
 
   const fetchCrewPinnedEvents = useCallback(async (pinsRequired: number = requiredPins) => {
-    if (!groupId) return;
+    if (!groupId || isDevMode) return;
     const events = await getCrewPinnedEvents(groupId, pinsRequired);
     setCrewBoardEvents(events);
     const eventIds = events.map((event) => event.supabaseId).filter((eventId): eventId is string => Boolean(eventId));
     refreshCrewPins(eventIds);
-  }, [groupId, refreshCrewPins, requiredPins]);
+  }, [groupId, isDevMode, refreshCrewPins, requiredPins]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -679,7 +684,7 @@ export default function GroupDetail() {
   }, [authLoading, navigate, user]);
 
   useEffect(() => {
-    if (user && groupId) {
+    if (user && groupId && !isDevMode) {
       fetchGroup();
       fetchMessages();
       fetchMembers();
@@ -881,15 +886,16 @@ export default function GroupDetail() {
     fetchReadReceipts,
     groupId,
     refreshCrewPins,
+    isDevMode,
     user,
   ]);
 
   useEffect(() => {
-    if (!user || !groupId) return;
+    if (!user || !groupId || isDevMode) return;
     runRetractedCleanup();
     const intervalId = window.setInterval(runRetractedCleanup, 60000);
     return () => window.clearInterval(intervalId);
-  }, [groupId, runRetractedCleanup, user]);
+  }, [groupId, isDevMode, runRetractedCleanup, user]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -915,12 +921,13 @@ export default function GroupDetail() {
       .map(message => message.attached_event_id)
       .filter((eventId): eventId is string => Boolean(eventId));
     messageEventIdsRef.current = eventIds;
-    if (user && groupId) {
+    if (user && groupId && !isDevMode) {
       refreshCrewPins(eventIds);
     }
-  }, [groupId, messages, refreshCrewPins, user]);
+  }, [groupId, isDevMode, messages, refreshCrewPins, user]);
 
   useEffect(() => {
+    if (isDevMode) return;
     if (messages.length > 0) {
       fetchReactions();
       updateReadReceipt();
@@ -928,7 +935,7 @@ export default function GroupDetail() {
     } else {
       setReactionsByMessage({});
     }
-  }, [fetchReadReceipts, fetchReactions, messages, updateReadReceipt]);
+  }, [fetchReadReceipts, fetchReactions, isDevMode, messages, updateReadReceipt]);
 
   // Keep the scroll padding in sync with the fixed composer height.
   useEffect(() => {
@@ -952,7 +959,7 @@ export default function GroupDetail() {
   }, []);
 
   useEffect(() => {
-    if (!groupId || messages.length === 0) return;
+    if (!groupId || isDevMode || messages.length === 0) return;
     const messageIds = messages.map((message) => message.id);
     if (messageIds.length === 0) return;
     const filter = `message_id=in.(${messageIds.join(',')})`;
@@ -975,10 +982,11 @@ export default function GroupDetail() {
     return () => {
       supabase.removeChannel(reactionsChannel);
     };
-  }, [fetchReactions, groupId, messages]);
+  }, [fetchReactions, groupId, isDevMode, messages]);
 
   const toggleCrewPin = async (eventId: string) => {
     if (!user || !groupId) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     const wasPinned = crewPinnedByUser.has(eventId);
     const previousPinned = new Set(crewPinnedByUser);
     const previousCounts = { ...crewPinCounts };
@@ -1020,6 +1028,7 @@ export default function GroupDetail() {
 
   const sendMessage = async () => {
     if (!user || !groupId || !newMessage.trim()) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     setSending(true);
     const userName = getDisplayName(user);
     typingChannelRef.current?.send({
@@ -1047,6 +1056,7 @@ export default function GroupDetail() {
 
   const inviteByUsername = async () => {
     if (!user || !groupId || !inviteUsername.trim()) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     setInviting(true);
     const { error } = await supabase.rpc('invite_user_to_group', {
       p_group_id: groupId,
@@ -1084,6 +1094,23 @@ export default function GroupDetail() {
         return new Date(lastReadAt).getTime() >= new Date(lastMessageByCurrentUser.created_at).getTime();
       }).length
     : 0;
+
+  if (isDevMode) {
+    return (
+      <div className="min-h-screen gradient-bg flex items-center justify-center px-4 text-center">
+        <div className="max-w-sm">
+          <Users className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
+          <h1 className="font-display text-lg font-semibold mb-2">Dev Mode is local only</h1>
+          <p className="text-sm text-muted-foreground mb-4">
+            Crew chat, voting, invites, and realtime presence require a real Supabase session.
+          </p>
+          <Button variant="neon" onClick={() => navigate('/auth')}>
+            Use real demo account
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (authLoading || loading) {
     return (

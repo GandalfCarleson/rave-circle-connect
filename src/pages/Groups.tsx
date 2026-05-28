@@ -12,6 +12,7 @@ import { AnimatedBackground } from '@/components/AnimatedBackground';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { blockDevModeWrite } from '@/lib/demoMode';
 import {
   Dialog,
   DialogContent,
@@ -42,7 +43,7 @@ interface GroupActivityRow {
 }
 
 export default function Groups() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, isDevMode } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [groups, setGroups] = useState<Group[]>([]);
@@ -69,6 +70,11 @@ export default function Groups() {
 
   const fetchGroups = useCallback(async () => {
     if (!user) return;
+    if (isDevMode) {
+      setGroups([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     
     try {
@@ -132,7 +138,7 @@ export default function Groups() {
     } finally {
       setLoading(false);
     }
-  }, [toast, user]);
+  }, [isDevMode, toast, user]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -141,13 +147,13 @@ export default function Groups() {
   }, [user, authLoading, navigate]);
 
   useEffect(() => {
-    if (user) {
+    if (user && !isDevMode) {
       fetchGroups();
     }
-  }, [fetchGroups, user]);
+  }, [fetchGroups, isDevMode, user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || isDevMode) return;
     const channel = supabase
       .channel(`group-members-${user.id}`)
       .on(
@@ -173,10 +179,10 @@ export default function Groups() {
       supabase.removeChannel(channel);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [fetchGroups, user]);
+  }, [fetchGroups, isDevMode, user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || isDevMode) return;
     const typingChannels = typingChannelsRef.current;
     const activeGroups = new Set(groups.map(group => group.id));
     typingChannels.forEach((channel, groupId) => {
@@ -216,7 +222,7 @@ export default function Groups() {
       typingChannels.forEach((channel) => supabase.removeChannel(channel));
       typingChannels.clear();
     };
-  }, [user, groups]);
+  }, [isDevMode, user, groups]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -235,7 +241,7 @@ export default function Groups() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || isDevMode) return;
     const presenceChannels = presenceChannelsRef.current;
     const activeGroups = new Set(groups.map(group => group.id));
     presenceChannels.forEach((channel, groupId) => {
@@ -283,7 +289,7 @@ export default function Groups() {
       presenceChannels.forEach((channel) => supabase.removeChannel(channel));
       presenceChannels.clear();
     };
-  }, [user, groups]);
+  }, [isDevMode, user, groups]);
 
 
   const formatActivityTime = (timestamp?: string | null) => {
@@ -370,6 +376,7 @@ export default function Groups() {
 
   const handleLeaveCrew = async (group: Group) => {
     if (!user) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     if (isOwner(group) && group.member_count > 1) {
       toast({
         title: 'Transfer ownership before leaving',
@@ -402,6 +409,7 @@ export default function Groups() {
 
   const handleDeleteCrew = async (group: Group) => {
     if (!user) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     if (!isOwner(group)) {
       toast({
         title: 'Not allowed',
@@ -428,6 +436,7 @@ export default function Groups() {
   };
 
   const createGroup = async () => {
+    if (blockDevModeWrite(isDevMode, toast)) return;
     if (!user) {
       toast({
         title: 'Not authenticated',
@@ -512,6 +521,29 @@ export default function Groups() {
     return (
       <div className="min-h-screen gradient-bg flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (isDevMode) {
+    return (
+      <div className="min-h-screen gradient-bg">
+        <AnimatedBackground />
+        <div className="sticky top-0 z-40 glass border-b border-border/50">
+          <div className="max-w-lg mx-auto px-4 py-4">
+            <h1 className="text-xl font-display font-bold">Your Crews</h1>
+          </div>
+        </div>
+        <div className="max-w-lg mx-auto px-4 py-12 text-center relative z-10">
+          <Users className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
+          <h3 className="font-display font-semibold text-lg mb-2">Dev Mode is local only</h3>
+          <p className="text-muted-foreground text-sm mb-4">
+            Crew creation, invites, and chat require a real Supabase session. Use the demo account for the full social flow.
+          </p>
+          <Button variant="neon" onClick={() => navigate('/auth')}>
+            Use real demo account
+          </Button>
+        </div>
       </div>
     );
   }

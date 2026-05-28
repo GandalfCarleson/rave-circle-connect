@@ -12,6 +12,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { GENRES, EVENT_TYPES, DATE_FILTERS, RADIUS_OPTIONS } from '@/lib/constants';
 import { fetchEventsWithFallback, type ExternalEvent, ensureSupabaseEvents } from '@/services/externalEventsService';
+import { blockDevModeWrite } from '@/lib/demoMode';
 import {
   Dialog,
   DialogContent,
@@ -60,7 +61,7 @@ function calculateDistance(lat1: number, lon1: number, lat2: number, lon2: numbe
 }
 
 export default function Feed() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, isDevMode } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -109,6 +110,7 @@ export default function Feed() {
 
   const requestLocation = useCallback(async () => {
     if (!user || locationRequestInFlightRef.current) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
 
     if (!navigator.geolocation) {
       setLocationStatus('denied');
@@ -141,7 +143,7 @@ export default function Feed() {
         });
       });
 
-      const { latitude, longitude } = position.coords;
+      const { latitude, longitude, accuracy } = position.coords;
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
         throw new Error('No valid coordinates were returned.');
       }
@@ -157,7 +159,9 @@ export default function Feed() {
       setProfile(prev => ({ ...prev, latitude, longitude }));
       toast({
         title: 'Location updated',
-        description: 'Using your current location for radius matching.',
+        description: accuracy && accuracy > 5000
+          ? 'Using your approximate location for radius matching.'
+          : 'Using your current location for radius matching.',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Location permission was denied or timed out.';
@@ -171,7 +175,7 @@ export default function Feed() {
       locationRequestInFlightRef.current = false;
       setIsLocating(false);
     }
-  }, [currentRadiusOption.label, profile.city, toast, user]);
+  }, [currentRadiusOption.label, isDevMode, profile.city, toast, user]);
 
   const fetchProfile = useCallback(async () => {
     if (!user) return;
@@ -459,6 +463,7 @@ export default function Feed() {
 
   const updateRadius = async (radius: number) => {
     if (!user) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     const previousRadius = profile.radius_km;
     setProfile(prev => ({ ...prev, radius_km: radius }));
     const { error } = await supabase
@@ -589,6 +594,7 @@ export default function Feed() {
   }, [fetchEvents, hasMore, isLoadingMore, loading, orderedEvents.length, page, visibleCount]);
 
   const handleShare = (event: ExternalEvent) => {
+    if (blockDevModeWrite(isDevMode, toast)) return;
     ensureEventReady(event).then((ready) => {
       if (!ready.supabaseId) {
         toast({
@@ -606,6 +612,7 @@ export default function Feed() {
 
   const toggleInterested = async (event: ExternalEvent) => {
     if (!user) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     const ready = await ensureEventReady(event);
     if (!ready.supabaseId) {
       toast({
@@ -672,6 +679,7 @@ export default function Feed() {
 
   const togglePinned = async (event: ExternalEvent) => {
     if (!user) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     const ready = await ensureEventReady(event);
     if (!ready.supabaseId) {
       toast({
@@ -738,6 +746,7 @@ export default function Feed() {
   const shareToGroup = async () => {
     if (!user || !selectedEventToShare) return;
     if (!selectedGroupId) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
 
     try {
     const { error } = await supabase

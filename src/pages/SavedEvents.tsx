@@ -10,7 +10,7 @@ import { resolveEventsBySupabaseIds } from '@/services/eventResolver';
 import type { ExternalEvent } from '@/services/externalEventsService';
 
 export default function SavedEvents() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, isDevMode } = useAuth();
   const navigate = useNavigate();
   const [events, setEvents] = useState<ExternalEvent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,6 +23,11 @@ export default function SavedEvents() {
 
   const fetchSavedEvents = useCallback(async () => {
     if (!user) return;
+    if (isDevMode) {
+      setEvents([]);
+      setLoading(false);
+      return;
+    }
     const { data } = await supabase
       .from('user_pinned_events')
       .select('event_id, created_at')
@@ -39,7 +44,7 @@ export default function SavedEvents() {
     const resolved = await resolveEventsBySupabaseIds(eventIds);
     setEvents(resolved);
     setLoading(false);
-  }, [user]);
+  }, [isDevMode, user]);
 
   useEffect(() => {
     if (user) {
@@ -68,7 +73,12 @@ export default function SavedEvents() {
       </div>
 
       <div className="max-w-lg mx-auto px-4 py-6 space-y-4 relative z-10">
-        {events.length === 0 ? (
+        {isDevMode ? (
+          <div className="text-center py-12 text-muted-foreground">
+            <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
+            <p>Saved events require a real demo account.</p>
+          </div>
+        ) : events.length === 0 ? (
           <div className="text-center py-12 text-muted-foreground">
             <Calendar className="w-12 h-12 mx-auto mb-4 opacity-50" />
             <p>No saved events yet — pin events from the feed to find them here.</p>

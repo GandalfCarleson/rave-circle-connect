@@ -250,6 +250,8 @@ export default function Profile() {
               userId={user!.id}
               currentAvatarUrl={profile.avatar_url}
               onUpload={(url) => setProfile(prev => ({ ...prev, avatar_url: url }))}
+              disabled={isDevMode}
+              disabledMessage="Dev Mode only stores local profile text. Use a real demo account for avatar upload."
             />
             <div className="flex-1 min-w-0">
               <h2 className="font-display font-bold text-lg truncate">{profile.name || 'Set your name'}</h2>

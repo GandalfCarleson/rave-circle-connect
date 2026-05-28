@@ -76,8 +76,24 @@ Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/c
 
 - Tap the logo 7 times on the auth screen to toggle Dev Mode (dev builds only).
 - In Dev Mode, signup and profile changes are stored locally and do not hit Supabase.
+- Dev Mode is limited to local auth/profile preview. Use a real Supabase account for Feed, events, crews, chat, saved events, and voting.
 - Use Reset Dev Session in Settings or the auth screen to clear the mock user.
 - A small DEV MODE pill appears in the UI when active.
+
+## Demo account flow
+
+For expo/demo runs, use a real Supabase email/password user so RLS-backed writes work normally.
+
+Optional local-only login prefill:
+
+```sh
+VITE_DEMO_EMAIL=demo@example.com
+VITE_DEMO_PASSWORD=your-demo-password
+```
+
+Put these in `.env.local`, not in source files. The auth screen only pre-fills the form; it does not bypass Supabase auth or fake a session.
+
+See `DEMO_CHECKLIST.md` for the recommended Friday demo path and fallbacks.
 
 ## Account deletion function
 

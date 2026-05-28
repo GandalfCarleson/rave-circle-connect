@@ -11,6 +11,7 @@ import { fetchEventsWithFallback, type ExternalEvent, ensureSupabaseEvents } fro
 import { resolveEventsBySupabaseIds } from '@/services/eventResolver';
 import { RADIUS_OPTIONS } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
+import { blockDevModeWrite } from '@/lib/demoMode';
 import {
   Dialog,
   DialogContent,
@@ -36,7 +37,7 @@ interface Profile {
 const MemoEventCard = memo(EventCard);
 
 export default function Discover() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, isDevMode } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
   const [openGroups, setOpenGroups] = useState<Group[]>([]);
@@ -389,6 +390,7 @@ export default function Discover() {
 
   const toggleInterested = async (event: ExternalEvent) => {
     if (!user) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     const ready = await ensureEventReady(event);
     if (!ready.supabaseId) {
       toast({
@@ -455,6 +457,7 @@ export default function Discover() {
 
   const togglePinned = async (event: ExternalEvent) => {
     if (!user) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     const ready = await ensureEventReady(event);
     if (!ready.supabaseId) {
       toast({
@@ -519,6 +522,7 @@ export default function Discover() {
   };
 
   const handleShare = (event: ExternalEvent) => {
+    if (blockDevModeWrite(isDevMode, toast)) return;
     ensureEventReady(event).then((ready) => {
       if (!ready.supabaseId) {
         toast({
@@ -537,6 +541,7 @@ export default function Discover() {
   const shareToGroup = async () => {
     if (!user || !selectedEventToShare) return;
     if (!selectedGroupId) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
 
     const { error } = await supabase
       .from('messages')
@@ -568,6 +573,7 @@ export default function Discover() {
 
   const joinPublicCrew = async (group: Group) => {
     if (!user) return;
+    if (blockDevModeWrite(isDevMode, toast)) return;
     setJoiningGroupId(group.id);
     const { error } = await supabase
       .from('group_members')

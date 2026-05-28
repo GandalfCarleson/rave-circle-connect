@@ -56,7 +56,9 @@ export const RAVECIRCLE_ALLOWED_EVENT_TERMS = [
 export const RAVECIRCLE_DENIED_EVENT_TERMS = [
   'jazz',
   'rock',
+  'alt-rock',
   'alt rock',
+  'alternative rock',
   'alternative',
   'indie',
   'pop',
@@ -76,14 +78,24 @@ export const RAVECIRCLE_DENIED_EVENT_TERMS = [
   'museum',
   'museet',
   'entrance',
+  'entrance ticket',
+  'entrance tickets',
   'entry ticket',
+  'entry tickets',
   'ticket pass',
+  'ticket passes',
   'annual pass',
+  'annual passes',
   'season pass',
+  'season passes',
   'membership',
+  'memberships',
   'medlemskap',
   'presentkort',
   'gift card',
+  'gift cards',
+  'giftcard',
+  'giftcards',
   'basket',
   'basketball',
   'sport',
@@ -97,10 +109,14 @@ export const RAVECIRCLE_DENIED_EVENT_TERMS = [
   'comedy',
   'family',
   'children',
+  'childrens',
   'kids',
 ] as const;
 
 const STRONG_ALLOWED_TERMS = [
+  'electronic',
+  'dance',
+  'edm',
   'techno',
   'hard techno',
   'hard-techno',
@@ -123,9 +139,20 @@ const STRONG_ALLOWED_TERMS = [
   'industrial techno',
   'warehouse rave',
   'dj set',
+  'club night',
+  'nightclub',
 ] as const;
 
-const GENERIC_MUSIC_TERMS = ['music', 'concert', 'live music', 'show', 'event', 'tickets'] as const;
+const GENERIC_MUSIC_TERMS = [
+  'music',
+  'concert',
+  'live music',
+  'show',
+  'event',
+  'events',
+  'tickets',
+  'ticket',
+] as const;
 
 const normalizeText = (value: string) =>
   value
@@ -183,9 +210,12 @@ export function isRaveCircleRelevantEvent(event: EventFilteringInput) {
   const scoredElectronic = event.lastFmTagged || (event.electronicScore ?? 0) >= 2;
   const hasAllowedSignal = scoredElectronic || hasAny(searchableText, allowedRegexes);
   const hasStrongAllowedSignal = scoredElectronic || hasAny(searchableText, strongAllowedRegexes);
+  const hasDeniedSignal = hasAny(searchableText, deniedRegexes);
+  const hasGenericMusicSignal = hasAny(searchableText, genericMusicRegexes);
 
   if (!hasAllowedSignal) return false;
-  if (hasAny(searchableText, deniedRegexes) && !hasStrongAllowedSignal) return false;
+  if (hasDeniedSignal && !hasStrongAllowedSignal) return false;
+  if (hasGenericMusicSignal && !hasStrongAllowedSignal) return false;
 
-  return !hasAny(searchableText, genericMusicRegexes) || hasStrongAllowedSignal;
+  return true;
 }
