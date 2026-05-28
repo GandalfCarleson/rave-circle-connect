@@ -40,6 +40,7 @@ targets:
       path: rave-circle_iOS/Info.plist
       properties:
         LSRequiresIPhoneOS: true
+        NSLocalNetworkUsageDescription: RaveCircle needs local network access during development to connect to the Vite dev server running on your Mac.
         UILaunchStoryboardName: LaunchScreen
         UIRequiredDeviceCapabilities: [arm64, metal]
         UISupportedInterfaceOrientations:
@@ -81,7 +82,42 @@ targets:
       - sdk: UIKit.framework
       - sdk: WebKit.framework
     preBuildScripts:
-      - script: npm run -- tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
+      - script: |
+          set -e
+
+          # Xcode GUI builds often miss Homebrew/NVM paths.
+          export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
+          if [ -f "$HOME/.nvm/nvm.sh" ]; then
+            . "$HOME/.nvm/nvm.sh" --no-use
+            nvm use --silent >/dev/null 2>&1 || true
+          fi
+
+          if ! command -v node >/dev/null 2>&1; then
+            echo "error: node not found in PATH for Xcode script phase."
+            echo "error: PATH=$PATH"
+            exit 1
+          fi
+
+          if ! command -v npm >/dev/null 2>&1; then
+            echo "error: npm not found in PATH for Xcode script phase."
+            echo "error: PATH=$PATH"
+            exit 1
+          fi
+
+          _tauri_log="$(mktemp)"
+          set +e
+          npm run -- tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR:-} ${ARCHS:?} >"${_tauri_log}" 2>&1
+          _tauri_status=$?
+          set -e
+          cat "${_tauri_log}"
+
+          if [ "${_tauri_status}" -ne 0 ]; then
+            if /usr/bin/grep -Eq "failed to read CLI options|Connection refused|TAURI_OPTIONS_SERVER_ADDR" "${_tauri_log}"; then
+              echo "error: Tauri iOS build bridge is unavailable for this Xcode run."
+              echo "error: Use 'npm run ios:build' or open Xcode with 'npm run ios:xcode' and keep that terminal running."
+            fi
+            exit "${_tauri_status}"
+          fi
         name: Build Rust Code
         basedOnDependencyAnalysis: false
         outputFiles:

@@ -16,6 +16,9 @@
     "android:dev": "tauri android dev",
     "android:build": "tauri android build",
     "ios:dev": "tauri ios dev",
+    "ios:dev:device": "tauri ios dev --host",
+    "ios:xcode": "tauri ios dev --open --no-watch",
+    "ios:xcode:device": "tauri ios dev --open --no-watch --host",
     "ios:build": "tauri ios build",
     "deploy:functions": "supabase functions deploy delete-account --no-verify-jwt && supabase functions deploy cleanup-retracted-messages --no-verify-jwt && supabase functions deploy tickster-events --no-verify-jwt && supabase functions deploy ticketmaster-events --no-verify-jwt && supabase functions deploy events-aggregate"
   },
