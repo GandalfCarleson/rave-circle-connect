@@ -1,7 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { Home, Users, Compass, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useAuth } from '@/hooks/useAuth';
 import { motion } from 'framer-motion';
 
 const navItems = [
@@ -15,7 +14,7 @@ export function BottomNav() {
   const location = useLocation();
 
   return (
-    <nav className="bottom-nav relative">
+    <nav className="bottom-nav">
       <div className="flex items-center justify-around h-full py-2 max-w-lg mx-auto">
         {navItems.map((item) => {
           const isActive = location.pathname === item.path;

@@ -312,10 +312,14 @@ export default function Discover() {
   const visibleEvents = sortedEvents.slice(0, visibleCount);
 
   useEffect(() => {
+    const scrollParent = document.querySelector('.app-shell__content');
     const handleScroll = () => {
       if (loading || isLoadingMore || loadMoreInFlightRef.current) return;
-      const scrollPosition = window.innerHeight + window.scrollY;
-      const threshold = document.body.offsetHeight - 300;
+      const scrollTop = scrollParent ? scrollParent.scrollTop : window.scrollY;
+      const viewportHeight = scrollParent ? scrollParent.clientHeight : window.innerHeight;
+      const scrollHeight = scrollParent ? scrollParent.scrollHeight : document.body.offsetHeight;
+      const scrollPosition = viewportHeight + scrollTop;
+      const threshold = scrollHeight - 300;
       if (scrollPosition < threshold) return;
 
       if (visibleCount < sortedEvents.length) {
@@ -331,8 +335,9 @@ export default function Discover() {
       }
     };
 
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
+    const eventTarget = scrollParent || window;
+    eventTarget.addEventListener('scroll', handleScroll);
+    return () => eventTarget.removeEventListener('scroll', handleScroll);
   }, [fetchRecommendedEvents, hasMore, isLoadingMore, loading, page, preferredGenres, profile, sortedEvents.length, visibleCount]);
 
   const fetchEventActions = useCallback(async () => {
@@ -603,7 +608,13 @@ export default function Discover() {
 
   const viewEventDetails = async (event: ExternalEvent) => {
     const ready = await ensureEventReady(event);
-    if (!ready.supabaseId) {
+    const detailId = ready.supabaseId || (ready.source === 'curated' ? ready.externalId : undefined);
+    if (!detailId) {
+      console.warn('[discover] unable to open event details', {
+        id: ready.id,
+        external_id: ready.externalId,
+        provider: ready.source,
+      });
       toast({
         title: 'Unable to open details',
         description: 'Please try again in a moment.',
@@ -611,10 +622,11 @@ export default function Discover() {
       });
       return;
     }
-    navigate(`/events/${ready.supabaseId}`, {
+    navigate(`/events/${detailId}`, {
       state: {
         eventPreview: {
-          id: ready.supabaseId,
+          id: detailId,
+          external_id: ready.externalId ?? null,
           name: ready.name,
           description: ready.description ?? null,
           venue_name: ready.venueName ?? null,
@@ -623,9 +635,11 @@ export default function Discover() {
           end_datetime: ready.endDateTime ?? null,
           min_price: ready.minPrice ?? null,
           ticket_url: ready.ticketUrl ?? null,
+          source_url: ready.sourceUrl ?? null,
           image_url: ready.imageUrl ?? null,
           event_type: ready.eventType ?? null,
           genres: ready.genres ?? [],
+          source: ready.source ?? null,
         },
       },
     });
@@ -640,9 +654,9 @@ export default function Discover() {
   }
 
   return (
-    <div className="min-h-screen gradient-bg">
+    <div className="mobile-page gradient-bg">
       {/* Header */}
-      <div className="sticky top-0 z-40 glass border-b border-border/50">
+      <div className="mobile-page__header glass border-b border-border/50">
         <div className="max-w-lg mx-auto px-4 py-4">
           <div className="mb-1 flex items-center justify-between">
             <h1 className="text-xl font-display font-bold">Discover</h1>
@@ -664,7 +678,7 @@ export default function Discover() {
         </div>
       </div>
 
-      <div className="max-w-lg mx-auto px-4 py-6 space-y-8">
+      <div className="mobile-page__content max-w-lg mx-auto px-4 py-6 space-y-8">
         {/* Open Groups Section */}
         <section>
           <div className="flex items-center gap-2 mb-4">

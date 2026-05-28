@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Zap, Users, Calendar, MapPin } from 'lucide-react';
+import { Users, Calendar, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -32,9 +32,14 @@ export default function Index() {
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}
           transition={{ type: 'spring', stiffness: 200, delay: 0.2 }}
-          className="inline-flex items-center justify-center w-24 h-24 rounded-3xl bg-gradient-to-br from-primary to-accent mb-8 shadow-neon"
+          className="inline-flex items-center justify-center w-28 h-28 mb-6"
         >
-          <Zap className="w-12 h-12 text-primary-foreground" />
+          <img
+            src="/icon-512.png"
+            alt="RaveCircle"
+            className="h-full w-full object-contain"
+            draggable={false}
+          />
         </motion.div>
 
         <h1 className="text-5xl font-display font-bold mb-4">

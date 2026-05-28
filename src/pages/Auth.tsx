@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, Lock, User, Loader2, Zap, Music, MapPin, ChevronRight, ChevronLeft } from 'lucide-react';
+import { Mail, Lock, User, Loader2, Music, MapPin, ChevronRight, ChevronLeft } from 'lucide-react';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -426,9 +426,14 @@ export default function Auth() {
             initial={{ scale: 0 }}
             animate={{ scale: 1 }}
             transition={{ type: 'spring', stiffness: 200, delay: 0.1 }}
-            className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-accent mb-4"
+            className="inline-flex items-center justify-center w-20 h-20 mb-3"
           >
-            <Zap className="w-8 h-8 text-primary-foreground" />
+            <img
+              src="/icon-512.png"
+              alt="RaveCircle"
+              className="h-full w-full object-contain"
+              draggable={false}
+            />
           </motion.div>
           <h1 className="text-3xl font-display font-bold text-gradient">RaveCircle</h1>
           <p className="text-muted-foreground mt-2">Your crew, your events, your vibe</p>

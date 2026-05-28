@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type SyntheticEvent } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, MapPin, Calendar, Ticket, Users, Check, Heart, CalendarPlus, Send } from 'lucide-react';
@@ -8,6 +8,9 @@ import { GenreChip } from '@/components/GenreChip';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { ensureSupabaseEvents, getCuratedEventByExternalId, type ExternalEvent } from '@/services/externalEventsService';
+import { getEventTicketUrl } from '@/lib/eventLinks';
+import { openExternalUrl } from '@/lib/openExternal';
 import {
   Dialog,
   DialogContent,
@@ -17,6 +20,7 @@ import {
 
 interface Event {
   id: string;
+  external_id?: string | null;
   name: string;
   description: string | null;
   venue_name: string | null;
@@ -25,15 +29,39 @@ interface Event {
   end_datetime: string | null;
   min_price: number | null;
   ticket_url: string | null;
+  tickets_url?: string | null;
+  ticketUrl?: string | null;
+  url?: string | null;
+  source_url?: string | null;
+  sourceUrl?: string | null;
   image_url: string | null;
   event_type: string | null;
   genres: string[];
+  source: string | null;
 }
 
 type EventStatus = 'going' | 'interested' | 'ignored' | null;
 type EventDetailLocationState = {
   eventPreview?: Event;
 };
+
+const toDetailEvent = (event: ExternalEvent): Event => ({
+  id: event.supabaseId ?? event.id,
+  external_id: event.externalId ?? event.id,
+  name: event.name,
+  description: event.description ?? null,
+  venue_name: event.venueName ?? null,
+  city: event.city ?? null,
+  start_datetime: event.startDateTime,
+  end_datetime: event.endDateTime ?? null,
+  min_price: event.minPrice ?? null,
+  ticket_url: event.ticketUrl ?? event.sourceUrl ?? null,
+  source_url: event.sourceUrl ?? null,
+  image_url: event.imageUrl ?? null,
+  event_type: event.eventType ?? null,
+  genres: event.genres ?? [],
+  source: event.source ?? null,
+});
 
 export default function EventDetail() {
   const { id } = useParams<{ id: string }>();
@@ -59,11 +87,11 @@ export default function EventDetail() {
 
   const fetchEvent = useCallback(async () => {
     if (!id) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('events')
       .select('*')
       .eq('id', id)
-      .single();
+      .maybeSingle();
     
     if (data) {
       const dbEvent = data as Event;
@@ -75,10 +103,59 @@ export default function EventDetail() {
         ticket_url: dbEvent.ticket_url ?? prev?.ticket_url ?? null,
         image_url: dbEvent.image_url ?? prev?.image_url ?? null,
         genres: dbEvent.genres?.length ? dbEvent.genres : (prev?.genres ?? []),
+        source: dbEvent.source ?? prev?.source ?? null,
       }));
+      setLoading(false);
+      return;
+    }
+
+    const { data: externalIdData, error: externalIdError } = await supabase
+      .from('events')
+      .select('*')
+      .eq('external_id', id)
+      .maybeSingle();
+
+    if (externalIdData) {
+      const dbEvent = externalIdData as Event;
+      setEvent(dbEvent);
+      navigate(`/events/${dbEvent.id}`, { replace: true });
+      setLoading(false);
+      return;
+    }
+
+    const curated = getCuratedEventByExternalId(id);
+    if (curated) {
+      const [hydrated] = await ensureSupabaseEvents([curated]);
+      const detailEvent = toDetailEvent(hydrated ?? curated);
+      setEvent(detailEvent);
+      if (hydrated?.supabaseId) {
+        navigate(`/events/${hydrated.supabaseId}`, {
+          replace: true,
+          state: { eventPreview: detailEvent },
+        });
+      } else {
+        console.warn('[event-detail] curated event could not be hydrated', {
+          id,
+          external_id: curated.externalId,
+          provider: curated.source,
+        });
+      }
+      setLoading(false);
+      return;
+    }
+
+    console.warn('[event-detail] event not found', {
+      id,
+      error: error?.message,
+      externalIdError: externalIdError?.message,
+      previewExternalId: previewEvent?.external_id,
+      previewProvider: previewEvent?.source,
+    });
+    if (previewEvent) {
+      setEvent(previewEvent);
     }
     setLoading(false);
-  }, [id]);
+  }, [id, navigate, previewEvent]);
 
   const fetchStatus = useCallback(async () => {
     if (!user || !id) return;
@@ -159,7 +236,7 @@ export default function EventDetail() {
   };
 
   const updateStatus = async (newStatus: 'going' | 'interested') => {
-    if (!user || !id) return;
+    if (!user || !event) return;
 
     const isTogglingOff = status === newStatus;
     if (isTogglingOff) {
@@ -167,7 +244,7 @@ export default function EventDetail() {
         .from('user_event_statuses')
         .delete()
         .eq('user_id', user.id)
-        .eq('event_id', id);
+        .eq('event_id', event.id);
 
       if (!error) {
         setStatus(null);
@@ -192,7 +269,7 @@ export default function EventDetail() {
       .from('user_event_statuses')
       .upsert({
         user_id: user.id,
-        event_id: id,
+        event_id: event.id,
         status: newStatus,
       }, { onConflict: 'user_id,event_id' });
 
@@ -260,13 +337,34 @@ END:VCALENDAR`;
 
   if (!event) {
     return (
-      <div className="min-h-screen gradient-bg flex items-center justify-center">
-        <p className="text-muted-foreground">Event not found</p>
+      <div className="min-h-screen gradient-bg flex items-center justify-center px-4 text-center">
+        <div>
+          <p className="font-display text-lg font-semibold">Event not found</p>
+          <p className="mt-2 text-sm text-muted-foreground">
+            This event could not be loaded. Reference: {id || 'unknown'}
+          </p>
+        </div>
       </div>
     );
   }
 
   const eventDate = new Date(event.start_datetime);
+  const ticketUrl = getEventTicketUrl(event);
+  const handleImageError = (imageEvent: SyntheticEvent<HTMLImageElement>) => {
+    if (!imageEvent.currentTarget.src.endsWith('/demo-events/fallback-rave.jpg')) {
+      imageEvent.currentTarget.src = '/demo-events/fallback-rave.jpg';
+    }
+  };
+  const openTicketUrl = async () => {
+    const opened = await openExternalUrl(ticketUrl);
+    if (!opened) {
+      toast({
+        title: 'Could not open link',
+        description: 'The ticket URL is unavailable or blocked by this browser.',
+        variant: 'destructive',
+      });
+    }
+  };
 
   return (
     <div className="min-h-screen gradient-bg">
@@ -277,6 +375,7 @@ END:VCALENDAR`;
             src={event.image_url}
             alt={event.name}
             className="w-full h-full object-cover"
+            onError={handleImageError}
           />
         ) : (
           <div className="w-full h-full bg-gradient-to-br from-primary/30 to-accent/30 flex items-center justify-center">
@@ -299,6 +398,11 @@ END:VCALENDAR`;
         {event.event_type && (
           <span className="absolute top-4 right-4 px-3 py-1.5 rounded-full bg-primary/90 text-primary-foreground text-sm font-medium capitalize">
             {event.event_type}
+          </span>
+        )}
+        {event.source === 'curated' && (
+          <span className="absolute bottom-4 left-4 px-3 py-1.5 rounded-full border border-border/70 bg-card/85 text-foreground text-sm font-medium backdrop-blur-sm">
+            RaveCircle Pick
           </span>
         )}
       </div>
@@ -435,9 +539,9 @@ END:VCALENDAR`;
               </Button>
             </div>
 
-            {event.ticket_url && (
+            {ticketUrl && (
               <Button
-                onClick={() => window.open(event.ticket_url!, '_blank')}
+                onClick={openTicketUrl}
                 variant="neon"
                 size="lg"
                 className="w-full"
